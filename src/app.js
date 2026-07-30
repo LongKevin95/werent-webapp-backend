@@ -18,19 +18,21 @@ import userRouter from "./modules/users/user.routes.js";
 const app = express();
 
 app.use(helmet());
-app.use(
-  pinoHttp({
-    transport:
-      env.NODE_ENV === "development"
-        ? {
-            target: "pino-pretty",
-            options: {
-              colorize: true,
-            },
-          }
-        : undefined,
-  }),
-);
+if (env.NODE_ENV !== "test") {
+  app.use(
+    pinoHttp({
+      transport:
+        env.NODE_ENV === "development"
+          ? {
+              target: "pino-pretty",
+              options: {
+                colorize: true,
+              },
+            }
+          : undefined,
+    }),
+  );
+}
 app.use(
   cors({
     origin: env.CORS_ORIGIN ?? true,

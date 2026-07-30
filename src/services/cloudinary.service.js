@@ -9,6 +9,7 @@ function uploadBuffer(file, options = {}) {
         folder: options.folder ?? "werent",
         resource_type: options.resourceType ?? "image",
         public_id: options.publicId,
+        transformation: options.transformation,
       },
       (error, result) => {
         if (error) {
