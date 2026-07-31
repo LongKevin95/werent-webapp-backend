@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
-    "start": "node --env-file=.env src/server.js",
+    "start": "node src/server.js",
     "seed:test-users": "node --env-file=.env src/scripts/seed-test-users.js",
     "test": "vitest run"
   },
