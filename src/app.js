@@ -17,6 +17,48 @@ import userRouter from "./modules/users/user.routes.js";
 
 const app = express();
 
+function normalizeOrigin(origin) {
+  if (typeof origin !== "string") {
+    return null;
+  }
+
+  const trimmedOrigin = origin.trim();
+
+  if (!trimmedOrigin) {
+    return null;
+  }
+
+  try {
+    return new URL(trimmedOrigin).origin;
+  } catch {
+    if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmedOrigin)) {
+      return `http://${trimmedOrigin}`;
+    }
+
+    if (/^[a-z0-9.-]+(:\d+)?$/i.test(trimmedOrigin)) {
+      return `https://${trimmedOrigin}`;
+    }
+
+    return trimmedOrigin;
+  }
+}
+
+const allowedCorsOrigins = env.CORS_ORIGIN?.split(",")
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+function isAllowedCorsOrigin(origin) {
+  if (!allowedCorsOrigins || allowedCorsOrigins.length === 0) {
+    return true;
+  }
+
+  if (!origin) {
+    return true;
+  }
+
+  return allowedCorsOrigins.includes(origin);
+}
+
 app.use(helmet());
 if (env.NODE_ENV !== "test") {
   app.use(
@@ -35,7 +77,14 @@ if (env.NODE_ENV !== "test") {
 }
 app.use(
   cors({
-    origin: env.CORS_ORIGIN ?? true,
+    origin(origin, callback) {
+      if (isAllowedCorsOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+    },
     credentials: true,
   }),
 );
