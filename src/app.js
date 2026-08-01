@@ -17,34 +17,88 @@ import userRouter from "./modules/users/user.routes.js";
 
 const app = express();
 
-function normalizeOrigin(origin) {
+if (env.NODE_ENV === "production") {
+  app.set("trust proxy", true);
+}
+
+function normalizeOriginValue(origin) {
   if (typeof origin !== "string") {
     return null;
   }
 
-  const trimmedOrigin = origin.trim();
+  const trimmedOrigin = origin.trim().replace(/\/+$/, "");
 
   if (!trimmedOrigin) {
     return null;
   }
 
-  try {
-    return new URL(trimmedOrigin).origin;
-  } catch {
-    if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmedOrigin)) {
-      return `http://${trimmedOrigin}`;
-    }
-
-    if (/^[a-z0-9.-]+(:\d+)?$/i.test(trimmedOrigin)) {
-      return `https://${trimmedOrigin}`;
-    }
-
+  if (/^https?:\/\//i.test(trimmedOrigin)) {
     return trimmedOrigin;
+  }
+
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmedOrigin)) {
+    return `http://${trimmedOrigin}`;
+  }
+
+  if (/^[a-z0-9.*-]+(:\d+)?$/i.test(trimmedOrigin)) {
+    return `https://${trimmedOrigin}`;
+  }
+
+  return trimmedOrigin;
+}
+
+function normalizeExactOrigin(origin) {
+  const normalizedOrigin = normalizeOriginValue(origin);
+
+  if (!normalizedOrigin || normalizedOrigin.includes("*")) {
+    return null;
+  }
+
+  try {
+    return new URL(normalizedOrigin).origin;
+  } catch {
+    return null;
   }
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createCorsOriginMatcher(origin) {
+  const normalizedOrigin = normalizeOriginValue(origin);
+
+  if (!normalizedOrigin) {
+    return null;
+  }
+
+  const exactOrigin = normalizeExactOrigin(normalizedOrigin);
+
+  if (exactOrigin) {
+    return {
+      type: "exact",
+      value: exactOrigin,
+    };
+  }
+
+  if (!normalizedOrigin.includes("*")) {
+    return {
+      type: "exact",
+      value: normalizedOrigin,
+    };
+  }
+
+  return {
+    type: "pattern",
+    value: normalizedOrigin,
+    regex: new RegExp(
+      `^${escapeRegex(normalizedOrigin).replace(/\\\*/g, ".*")}$`,
+    ),
+  };
+}
+
 const allowedCorsOrigins = env.CORS_ORIGIN?.split(",")
-  .map(normalizeOrigin)
+  .map(createCorsOriginMatcher)
   .filter(Boolean);
 
 function isAllowedCorsOrigin(origin) {
@@ -56,7 +110,13 @@ function isAllowedCorsOrigin(origin) {
     return true;
   }
 
-  return allowedCorsOrigins.includes(origin);
+  return allowedCorsOrigins.some((allowedOrigin) => {
+    if (allowedOrigin.type === "exact") {
+      return allowedOrigin.value === origin;
+    }
+
+    return allowedOrigin.regex.test(origin);
+  });
 }
 
 app.use(helmet());
@@ -86,6 +146,8 @@ app.use(
       callback(new Error(`Origin ${origin} is not allowed by CORS.`));
     },
     credentials: true,
+    maxAge: 600,
+    optionsSuccessStatus: 204,
   }),
 );
 app.use(cookieParser());
