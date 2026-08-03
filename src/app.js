@@ -17,6 +17,108 @@ import userRouter from "./modules/users/user.routes.js";
 
 const app = express();
 
+if (env.NODE_ENV === "production") {
+  app.set("trust proxy", true);
+}
+
+function normalizeOriginValue(origin) {
+  if (typeof origin !== "string") {
+    return null;
+  }
+
+  const trimmedOrigin = origin.trim().replace(/\/+$/, "");
+
+  if (!trimmedOrigin) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(trimmedOrigin)) {
+    return trimmedOrigin;
+  }
+
+  if (/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(trimmedOrigin)) {
+    return `http://${trimmedOrigin}`;
+  }
+
+  if (/^[a-z0-9.*-]+(:\d+)?$/i.test(trimmedOrigin)) {
+    return `https://${trimmedOrigin}`;
+  }
+
+  return trimmedOrigin;
+}
+
+function normalizeExactOrigin(origin) {
+  const normalizedOrigin = normalizeOriginValue(origin);
+
+  if (!normalizedOrigin || normalizedOrigin.includes("*")) {
+    return null;
+  }
+
+  try {
+    return new URL(normalizedOrigin).origin;
+  } catch {
+    return null;
+  }
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createCorsOriginMatcher(origin) {
+  const normalizedOrigin = normalizeOriginValue(origin);
+
+  if (!normalizedOrigin) {
+    return null;
+  }
+
+  const exactOrigin = normalizeExactOrigin(normalizedOrigin);
+
+  if (exactOrigin) {
+    return {
+      type: "exact",
+      value: exactOrigin,
+    };
+  }
+
+  if (!normalizedOrigin.includes("*")) {
+    return {
+      type: "exact",
+      value: normalizedOrigin,
+    };
+  }
+
+  return {
+    type: "pattern",
+    value: normalizedOrigin,
+    regex: new RegExp(
+      `^${escapeRegex(normalizedOrigin).replace(/\\\*/g, ".*")}$`,
+    ),
+  };
+}
+
+const allowedCorsOrigins = env.CORS_ORIGIN?.split(",")
+  .map(createCorsOriginMatcher)
+  .filter(Boolean);
+
+function isAllowedCorsOrigin(origin) {
+  if (!allowedCorsOrigins || allowedCorsOrigins.length === 0) {
+    return true;
+  }
+
+  if (!origin) {
+    return true;
+  }
+
+  return allowedCorsOrigins.some((allowedOrigin) => {
+    if (allowedOrigin.type === "exact") {
+      return allowedOrigin.value === origin;
+    }
+
+    return allowedOrigin.regex.test(origin);
+  });
+}
+
 app.use(helmet());
 if (env.NODE_ENV !== "test") {
   app.use(
@@ -35,8 +137,17 @@ if (env.NODE_ENV !== "test") {
 }
 app.use(
   cors({
-    origin: env.CORS_ORIGIN ?? true,
+    origin(origin, callback) {
+      if (isAllowedCorsOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin ${origin} is not allowed by CORS.`));
+    },
     credentials: true,
+    maxAge: 600,
+    optionsSuccessStatus: 204,
   }),
 );
 app.use(cookieParser());
