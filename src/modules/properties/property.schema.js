@@ -6,8 +6,8 @@ import {
 } from "../../common/constants.js";
 
 const propertyCoordinatesSchema = z.object({
-  lat: z.coerce.number(),
-  lng: z.coerce.number(),
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
 });
 
 const propertyPackageSchema = z.object({
@@ -30,6 +30,11 @@ export const createPropertySchema = z.object({
   addressLine: z.string().trim().optional(),
   projectName: z.string().trim().optional(),
   locationNote: z.string().trim().optional(),
+  formattedAddress: z.string().trim().optional(),
+  placeId: z.string().trim().nullable().optional(),
+  mapProvider: z.string().trim().optional(),
+  isPinAdjusted: z.coerce.boolean().optional(),
+  addressComponents: z.array(z.unknown()).optional(),
   coordinates: propertyCoordinatesSchema.optional(),
   price: z.coerce.number().min(0, "Giá phải lớn hơn hoặc bằng 0"),
   depositAmount: z.coerce.number().min(0).optional(),

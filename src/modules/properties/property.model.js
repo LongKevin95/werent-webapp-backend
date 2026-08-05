@@ -158,6 +158,29 @@ const propertySchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    formattedAddress: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    placeId: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    mapProvider: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    isPinAdjusted: {
+      type: Boolean,
+      default: false,
+    },
+    addressComponents: {
+      type: [mongoose.Schema.Types.Mixed],
+      default: [],
+    },
     coordinates: {
       type: propertyCoordinatesSchema,
       default: () => ({ lat: null, lng: null }),
