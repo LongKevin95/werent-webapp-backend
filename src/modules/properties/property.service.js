@@ -1,5 +1,5 @@
 import ApiError from "../../common/ApiError.js";
-import { ROLES } from "../../common/constants.js";
+import { PROPERTY_STATUS, ROLES } from "../../common/constants.js";
 import { uploadFiles } from "../../services/cloudinary.service.js";
 import Property from "./property.model.js";
 
@@ -18,6 +18,9 @@ function buildQueryFilters(query) {
     filters.$or = [
       { title: { $regex: query.keyword, $options: "i" } },
       { address: { $regex: query.keyword, $options: "i" } },
+      { projectName: { $regex: query.keyword, $options: "i" } },
+      { district: { $regex: query.keyword, $options: "i" } },
+      { city: { $regex: query.keyword, $options: "i" } },
     ];
   }
 
@@ -66,14 +69,23 @@ export async function createProperty(ownerId, payload, files = []) {
     folder: "werent/properties",
   });
 
-  return Property.create({
+  const propertyPayload = {
     ...payload,
     owner: ownerId,
     images: uploadedImages.map((image) => ({
       url: image.secureUrl,
       publicId: image.publicId,
     })),
-  });
+  };
+
+  if (
+    propertyPayload.status === PROPERTY_STATUS.ACTIVE &&
+    !propertyPayload.publishedAt
+  ) {
+    propertyPayload.publishedAt = new Date();
+  }
+
+  return Property.create(propertyPayload);
 }
 
 export async function updateProperty(propertyId, actor, payload, files = []) {
@@ -84,7 +96,8 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
   }
 
   const isOwner = property.owner.toString() === actor._id.toString();
-  const isAdmin = Array.isArray(actor.roles) && actor.roles.includes(ROLES.ADMIN);
+  const isAdmin =
+    Array.isArray(actor.roles) && actor.roles.includes(ROLES.ADMIN);
 
   if (!isOwner && !isAdmin) {
     throw new ApiError(403, "Bạn không thể chỉnh sửa tin đăng này.");
@@ -95,6 +108,10 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
   });
 
   Object.assign(property, payload);
+
+  if (property.status === PROPERTY_STATUS.ACTIVE && !property.publishedAt) {
+    property.publishedAt = new Date();
+  }
 
   if (uploadedImages.length > 0) {
     property.images = [
@@ -118,9 +135,17 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
   }
 
   property.status = payload.status;
-  property.rejectionReason = payload.rejectionReason ?? null;
-  property.approvedBy = reviewerId;
-  await property.save();
+  property.rejectionReason =
+    payload.status === PROPERTY_STATUS.REJECTED
+      ? (payload.rejectionReason ?? null)
+      : null;
+  property.reviewedBy = reviewerId;
+  property.reviewedAt = new Date();
 
+  if (payload.status === PROPERTY_STATUS.ACTIVE && !property.publishedAt) {
+    property.publishedAt = new Date();
+  }
+
+  await property.save();
   return property;
 }

@@ -22,6 +22,7 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: optionalString,
   CLOUDINARY_API_KEY: optionalString,
   CLOUDINARY_API_SECRET: optionalString,
+  GEOAPIFY_API_KEY: optionalString,
   SEPAY_API_KEY: optionalString,
   SEPAY_WEBHOOK_SECRET: optionalString,
   SEPAY_BANK_BIN: optionalString,
