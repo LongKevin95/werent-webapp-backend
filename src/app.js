@@ -2,6 +2,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import express from "express";
 import helmet from "helmet";
+import path from "node:path";
 import pinoHttp from "pino-http";
 import env from "./config/env.js";
 import { notFoundHandler } from "./middleware/errorHandler.js";
@@ -154,6 +155,7 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use(apiRateLimit);
 
 app.use("/api/auth", authRouter);

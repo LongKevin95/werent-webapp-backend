@@ -1,14 +1,16 @@
 import ApiError from "../../common/ApiError.js";
-import { PROPERTY_STATUS, ROLES } from "../../common/constants.js";
-import { uploadFiles } from "../../services/cloudinary.service.js";
+import {
+  PROPERTY_STATUS,
+  PROPERTY_STATUS_LIST,
+  ROLES,
+} from "../../common/constants.js";
+import { deleteAsset, uploadFiles } from "../../services/cloudinary.service.js";
 import Property from "./property.model.js";
 
 function buildQueryFilters(query) {
-  const filters = {};
-
-  if (query.status) {
-    filters.status = query.status;
-  }
+  const filters = {
+    status: PROPERTY_STATUS.ACTIVE,
+  };
 
   if (query.owner) {
     filters.owner = query.owner;
@@ -51,6 +53,46 @@ export async function listProperties(query) {
   };
 }
 
+export async function listPropertiesByOwner(ownerId, query) {
+  const page = query.page ?? 1;
+  const limit = query.limit ?? 10;
+  const filters = { owner: ownerId };
+
+  if (query.status) {
+    filters.status = query.status;
+  }
+
+  const [items, total, statusCountEntries] = await Promise.all([
+    Property.find(filters)
+      .populate("owner", "fullName email phone roles")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Property.countDocuments(filters),
+    Promise.all(
+      PROPERTY_STATUS_LIST.map(async (status) => [
+        status,
+        await Property.countDocuments({ owner: ownerId, status }),
+      ]),
+    ),
+  ]);
+  const statusCounts = Object.fromEntries(statusCountEntries);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+    statusCounts: {
+      all: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+      ...statusCounts,
+    },
+  };
+}
+
 export async function getPropertyById(propertyId) {
   const property = await Property.findById(propertyId).populate(
     "owner",
@@ -71,19 +113,14 @@ export async function createProperty(ownerId, payload, files = []) {
 
   const propertyPayload = {
     ...payload,
+    status: PROPERTY_STATUS.ACTIVE,
+    publishedAt: new Date(),
     owner: ownerId,
     images: uploadedImages.map((image) => ({
       url: image.secureUrl,
       publicId: image.publicId,
     })),
   };
-
-  if (
-    propertyPayload.status === PROPERTY_STATUS.ACTIVE &&
-    !propertyPayload.publishedAt
-  ) {
-    propertyPayload.publishedAt = new Date();
-  }
 
   return Property.create(propertyPayload);
 }
@@ -148,4 +185,29 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
 
   await property.save();
   return property;
+}
+
+export async function deleteProperty(propertyId, actor) {
+  const property = await Property.findById(propertyId);
+
+  if (!property) {
+    throw new ApiError(404, "Không tìm thấy tin đăng.");
+  }
+
+  const isOwner = property.owner.toString() === actor._id.toString();
+  const isAdmin =
+    Array.isArray(actor.roles) && actor.roles.includes(ROLES.ADMIN);
+
+  if (!isOwner && !isAdmin) {
+    throw new ApiError(403, "Bạn không thể xóa tin đăng này.");
+  }
+
+  await property.deleteOne();
+
+  await Promise.all(
+    property.images
+      .map((image) => image.publicId)
+      .filter(Boolean)
+      .map((publicId) => deleteAsset(publicId).catch(() => null)),
+  );
 }

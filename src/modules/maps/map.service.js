@@ -6,6 +6,9 @@ const GEOAPIFY_PLACES_BASE_URL = "https://api.geoapify.com/v2";
 const DEFAULT_SEARCH_BIAS = { lat: 10.7721, lng: 106.6983 };
 const VIETNAM_BOUNDING_BOX = "rect:102.1,8.2,109.6,23.4";
 const HIGH_CONFIDENCE_SCORE = 95;
+const AUTOCOMPLETE_CACHE_TTL_MS = 5 * 60 * 1000;
+const AUTOCOMPLETE_CACHE_LIMIT = 300;
+const AUTOCOMPLETE_CACHE_COORDINATE_PRECISION = 2;
 const PLACE_NAME_CATEGORIES = [
   "commercial",
   "commercial.shopping_mall",
@@ -59,6 +62,7 @@ const ADMINISTRATIVE_RESULT_TYPES = new Set([
   "state",
   "suburb",
 ]);
+const autocompleteCache = new Map();
 
 function ensureGeoapifyApiKey() {
   if (!env.GEOAPIFY_API_KEY) {
@@ -390,6 +394,54 @@ function hasHighConfidenceResult(places, queryVariants, options = {}) {
   );
 }
 
+function formatAutocompleteCacheCoordinate(value) {
+  const coordinate = Number(value);
+
+  return Number.isFinite(coordinate)
+    ? coordinate.toFixed(AUTOCOMPLETE_CACHE_COORDINATE_PRECISION)
+    : "";
+}
+
+function buildAutocompleteCacheKey(query) {
+  return [
+    toSearchKey(query.query),
+    formatAutocompleteCacheCoordinate(query.lat ?? DEFAULT_SEARCH_BIAS.lat),
+    formatAutocompleteCacheCoordinate(query.lng ?? DEFAULT_SEARCH_BIAS.lng),
+    query.limit ?? 5,
+  ].join("|");
+}
+
+function getCachedAutocompletePlaces(cacheKey) {
+  const cachedResult = autocompleteCache.get(cacheKey);
+
+  if (!cachedResult) {
+    return null;
+  }
+
+  if (cachedResult.expiresAt <= Date.now()) {
+    autocompleteCache.delete(cacheKey);
+    return null;
+  }
+
+  autocompleteCache.delete(cacheKey);
+  autocompleteCache.set(cacheKey, cachedResult);
+  return cachedResult.places;
+}
+
+function rememberAutocompletePlaces(cacheKey, places) {
+  autocompleteCache.set(cacheKey, {
+    expiresAt: Date.now() + AUTOCOMPLETE_CACHE_TTL_MS,
+    places,
+  });
+
+  while (autocompleteCache.size > AUTOCOMPLETE_CACHE_LIMIT) {
+    const oldestKey = autocompleteCache.keys().next().value;
+    autocompleteCache.delete(oldestKey);
+  }
+
+  return places;
+}
+
 async function fetchGeoapifyAutocomplete(text, biasLat, biasLng, limit) {
   const url = buildGeoapifyUrl(GEOAPIFY_GEOCODE_BASE_URL, "/autocomplete", {
     bias: `proximity:${biasLng},${biasLat}`,
@@ -459,6 +511,13 @@ export async function autocompletePlaces(query) {
   const biasLat = query.lat ?? DEFAULT_SEARCH_BIAS.lat;
   const biasLng = query.lng ?? DEFAULT_SEARCH_BIAS.lng;
   const limit = query.limit;
+  const cacheKey = buildAutocompleteCacheKey(query);
+  const cachedPlaces = getCachedAutocompletePlaces(cacheKey);
+
+  if (cachedPlaces) {
+    return cachedPlaces;
+  }
+
   const queryVariants = createQueryVariants(query.query);
   const administrativeQuery = getAdministrativeQuery(query.query);
   const searchOptions = {
@@ -475,11 +534,14 @@ export async function autocompletePlaces(query) {
     !administrativeQuery &&
     hasHighConfidenceResult(primaryPlaces, queryVariants, searchOptions)
   ) {
-    return mergeAndRankPlaces(
-      [primaryPlaces],
-      queryVariants,
-      limit,
-      searchOptions,
+    return rememberAutocompletePlaces(
+      cacheKey,
+      mergeAndRankPlaces(
+        [primaryPlaces],
+        queryVariants,
+        limit,
+        searchOptions,
+      ),
     );
   }
 
@@ -537,11 +599,14 @@ export async function autocompletePlaces(query) {
     );
 
     if (administrativePlaces.length > 0) {
-      return administrativePlaces.slice(0, limit);
+      return rememberAutocompletePlaces(
+        cacheKey,
+        administrativePlaces.slice(0, limit),
+      );
     }
   }
 
-  return rankedPlaces;
+  return rememberAutocompletePlaces(cacheKey, rankedPlaces);
 }
 
 export async function reverseGeocodeLocation(query) {

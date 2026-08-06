@@ -255,6 +255,11 @@ const propertySchema = new mongoose.Schema(
       default: "",
       trim: true,
     },
+    internetPrice: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     availableFrom: {
       type: Date,
       default: null,
@@ -313,7 +318,7 @@ const propertySchema = new mongoose.Schema(
     status: {
       type: String,
       enum: PROPERTY_STATUS_LIST,
-      default: PROPERTY_STATUS.DRAFT,
+      default: PROPERTY_STATUS.ACTIVE,
       index: true,
     },
     owner: {

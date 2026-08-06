@@ -5,6 +5,8 @@ import upload from "../../middleware/upload.js";
 import validate from "../../middleware/validate.js";
 import {
   createPropertyListing,
+  deletePropertyListing,
+  getMyProperties,
   getProperties,
   getProperty,
   reviewPropertyListing,
@@ -12,6 +14,7 @@ import {
 } from "./property.controller.js";
 import {
   createPropertySchema,
+  myPropertyQuerySchema,
   propertyQuerySchema,
   updatePropertySchema,
   updatePropertyStatusSchema,
@@ -20,6 +23,12 @@ import {
 const router = Router();
 
 router.get("/", validate(propertyQuerySchema, "query"), getProperties);
+router.get(
+  "/my-listings",
+  requireAuth,
+  validate(myPropertyQuerySchema, "query"),
+  getMyProperties,
+);
 router.get("/:propertyId", getProperty);
 router.post(
   "/",
@@ -42,5 +51,6 @@ router.patch(
   validate(updatePropertyStatusSchema),
   reviewPropertyListing,
 );
+router.delete("/:propertyId", requireAuth, deletePropertyListing);
 
 export default router;
