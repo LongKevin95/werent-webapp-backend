@@ -109,6 +109,38 @@ describe("property publishing shortcut", () => {
     );
   });
 
+  it("stores new listings as drafts when the wizard requests draft status", async () => {
+    const registerResponse = await registerUser();
+    const token = registerResponse.body.data.accessToken;
+
+    const createResponse = await request(app)
+      .post("/api/properties")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Draft apartment for later",
+        propertyType: "Apartment",
+        address: "22 Nguyen Trai, District 1",
+        city: "TP. Ho Chi Minh",
+        district: "District 1",
+        ward: "Ben Thanh",
+        price: 9200000,
+        status: PROPERTY_STATUS.DRAFT,
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.data.property.status).toBe(
+      PROPERTY_STATUS.DRAFT,
+    );
+    expect(createResponse.body.data.property.publishedAt).toBeNull();
+
+    const searchResponse = await request(app)
+      .get("/api/properties")
+      .query({ keyword: "Draft apartment" });
+
+    expect(searchResponse.status).toBe(200);
+    expect(searchResponse.body.data.items).toHaveLength(0);
+  });
+
   it("accepts multipart payloads from the post listing wizard", async () => {
     const registerResponse = await registerUser();
     const token = registerResponse.body.data.accessToken;
@@ -239,6 +271,160 @@ describe("property publishing shortcut", () => {
     expect(hiddenResponse.body.data.items[0].status).toBe(
       PROPERTY_STATUS.HIDDEN,
     );
+  });
+
+  it("allows owners to update their listings and replace the image order", async () => {
+    const ownerResponse = await registerUser();
+    const ownerId = ownerResponse.body.data.user.id;
+    const token = ownerResponse.body.data.accessToken;
+    const property = await Property.create({
+      title: "Listing before update",
+      propertyType: "Studio",
+      address: "15 Nguyen Co Thach",
+      price: 7000000,
+      city: "Old city",
+      district: "Old district",
+      images: [
+        {
+          publicId: "local/werent/properties/old-cover.png",
+          url: "/api/uploads/werent/properties/old-cover.png",
+        },
+        {
+          publicId: "local/werent/properties/kept-image.png",
+          url: "/api/uploads/werent/properties/kept-image.png",
+        },
+      ],
+      owner: ownerId,
+      status: PROPERTY_STATUS.ACTIVE,
+    });
+
+    const updateResponse = await request(app)
+      .patch(`/api/properties/${property._id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .field("title", "Listing after update")
+      .field("description", "")
+      .field("city", "Thành phố Hồ Chí Minh")
+      .field("district", "Quận 1")
+      .field(
+        "existingImages",
+        JSON.stringify([
+          {
+            publicId: "local/werent/properties/kept-image.png",
+            url: "/api/uploads/werent/properties/kept-image.png",
+          },
+        ]),
+      )
+      .field(
+        "imageOrder",
+        JSON.stringify([
+          {
+            publicId: "local/werent/properties/kept-image.png",
+            source: "existing",
+            url: "/api/uploads/werent/properties/kept-image.png",
+          },
+          {
+            fileIndex: 0,
+            source: "new",
+          },
+        ]),
+      )
+      .attach("images", tinyPngBuffer, {
+        contentType: "image/png",
+        filename: "new-room.png",
+      });
+
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.data.property).toMatchObject({
+      title: "Listing after update",
+      city: "Thành phố Hồ Chí Minh",
+      district: "Quận 1",
+      description: "",
+      status: PROPERTY_STATUS.ACTIVE,
+    });
+    expect(updateResponse.body.data.property.images).toHaveLength(2);
+    expect(updateResponse.body.data.property.images[0]).toMatchObject({
+      publicId: "local/werent/properties/kept-image.png",
+      url: "/api/uploads/werent/properties/kept-image.png",
+    });
+    expect(updateResponse.body.data.property.images[1]).toMatchObject({
+      publicId: expect.stringMatching(/^local\/werent\/properties\//),
+      url: expect.stringMatching(/^\/api\/uploads\/werent\/properties\//),
+    });
+    expect(
+      updateResponse.body.data.property.images.some(
+        (image) => image.publicId === "local/werent/properties/old-cover.png",
+      ),
+    ).toBe(false);
+  });
+
+  it("allows owners to hide and show their active listings", async () => {
+    const ownerResponse = await registerUser();
+    const ownerId = ownerResponse.body.data.user.id;
+    const token = ownerResponse.body.data.accessToken;
+    const property = await Property.create({
+      title: "Toggle visibility listing",
+      propertyType: "Studio",
+      address: "15 Nguyen Co Thach",
+      price: 7000000,
+      owner: ownerId,
+      status: PROPERTY_STATUS.ACTIVE,
+      publishedAt: new Date(),
+    });
+
+    const hideResponse = await request(app)
+      .patch(`/api/properties/${property._id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: PROPERTY_STATUS.HIDDEN });
+
+    expect(hideResponse.status).toBe(200);
+    expect(hideResponse.body.data.property.status).toBe(
+      PROPERTY_STATUS.HIDDEN,
+    );
+
+    const hiddenSearchResponse = await request(app)
+      .get("/api/properties")
+      .query({ keyword: "Toggle visibility" });
+
+    expect(hiddenSearchResponse.status).toBe(200);
+    expect(hiddenSearchResponse.body.data.items).toHaveLength(0);
+
+    const showResponse = await request(app)
+      .patch(`/api/properties/${property._id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: PROPERTY_STATUS.ACTIVE });
+
+    expect(showResponse.status).toBe(200);
+    expect(showResponse.body.data.property.status).toBe(
+      PROPERTY_STATUS.ACTIVE,
+    );
+    expect(showResponse.body.data.property.publishedAt).toEqual(
+      expect.any(String),
+    );
+  });
+
+  it("prevents users from updating another owner's listing", async () => {
+    const ownerResponse = await registerUser();
+    const otherOwnerResponse = await registerUser("other-update@example.com");
+    const ownerId = ownerResponse.body.data.user.id;
+    const otherToken = otherOwnerResponse.body.data.accessToken;
+    const property = await Property.create({
+      title: "Protected update listing",
+      propertyType: "Studio",
+      address: "15 Nguyen Co Thach",
+      price: 7000000,
+      owner: ownerId,
+      status: PROPERTY_STATUS.ACTIVE,
+    });
+
+    const updateResponse = await request(app)
+      .patch(`/api/properties/${property._id}`)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .send({ title: "Should not update" });
+
+    expect(updateResponse.status).toBe(403);
+    await expect(Property.findById(property._id).lean()).resolves.toMatchObject({
+      title: "Protected update listing",
+    });
   });
 
   it("allows owners to delete their own listings", async () => {

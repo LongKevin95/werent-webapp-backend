@@ -7,6 +7,117 @@ import {
 import { deleteAsset, uploadFiles } from "../../services/cloudinary.service.js";
 import Property from "./property.model.js";
 
+function serializePropertyImage(image) {
+  return {
+    publicId: image.publicId ?? null,
+    url: image.url,
+  };
+}
+
+function getPropertyImageKey(image) {
+  if (image.publicId) {
+    return `public:${image.publicId}`;
+  }
+
+  return image.url ? `url:${image.url}` : "";
+}
+
+function getExistingImageFromMap(imageMap, image) {
+  const candidates = [
+    image.publicId ? `public:${image.publicId}` : "",
+    image.url ? `url:${image.url}` : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const existingImage = imageMap.get(candidate);
+
+    if (existingImage) {
+      return existingImage;
+    }
+  }
+
+  return null;
+}
+
+function mapUploadedImage(image) {
+  return {
+    url: image.secureUrl,
+    publicId: image.publicId,
+  };
+}
+
+function buildUpdatedPropertyImages(currentImages, uploadedImages, payload) {
+  const currentImageMap = new Map();
+  const uploadedPropertyImages = uploadedImages.map(mapUploadedImage);
+
+  currentImages.forEach((image) => {
+    if (image.publicId) {
+      currentImageMap.set(`public:${image.publicId}`, image);
+    }
+
+    if (image.url) {
+      currentImageMap.set(`url:${image.url}`, image);
+    }
+  });
+
+  if (Array.isArray(payload.imageOrder)) {
+    const usedExistingKeys = new Set();
+    const usedUploadIndexes = new Set();
+    const orderedImages = [];
+
+    payload.imageOrder.forEach((item) => {
+      if (item.source === "existing") {
+        const existingImage = getExistingImageFromMap(currentImageMap, item);
+        const existingKey = existingImage ? getPropertyImageKey(existingImage) : "";
+
+        if (existingImage && existingKey && !usedExistingKeys.has(existingKey)) {
+          orderedImages.push(existingImage);
+          usedExistingKeys.add(existingKey);
+        }
+        return;
+      }
+
+      const uploadedImage = uploadedPropertyImages[item.fileIndex];
+
+      if (uploadedImage && !usedUploadIndexes.has(item.fileIndex)) {
+        orderedImages.push(uploadedImage);
+        usedUploadIndexes.add(item.fileIndex);
+      }
+    });
+
+    uploadedPropertyImages.forEach((uploadedImage, index) => {
+      if (!usedUploadIndexes.has(index)) {
+        orderedImages.push(uploadedImage);
+      }
+    });
+
+    return orderedImages;
+  }
+
+  if (Array.isArray(payload.existingImages)) {
+    return [
+      ...payload.existingImages
+        .map((image) => getExistingImageFromMap(currentImageMap, image))
+        .filter(Boolean),
+      ...uploadedPropertyImages,
+    ];
+  }
+
+  return [...currentImages, ...uploadedPropertyImages];
+}
+
+async function deleteRemovedPropertyImages(currentImages, nextImages) {
+  const nextImageKeys = new Set(nextImages.map(getPropertyImageKey));
+
+  await Promise.all(
+    currentImages
+      .filter((image) => !nextImageKeys.has(getPropertyImageKey(image)))
+      .map((image) => image.publicId)
+      .filter(Boolean)
+      .map((publicId) => deleteAsset(publicId).catch(() => null)),
+  );
+}
+
 function buildQueryFilters(query) {
   const filters = {
     status: PROPERTY_STATUS.ACTIVE,
@@ -110,11 +221,17 @@ export async function createProperty(ownerId, payload, files = []) {
   const uploadedImages = await uploadFiles(files, {
     folder: "werent/properties",
   });
+  const requestedStatus =
+    payload.status === PROPERTY_STATUS.DRAFT
+      ? PROPERTY_STATUS.DRAFT
+      : PROPERTY_STATUS.ACTIVE;
+  const { status: _status, ...propertyFields } = payload;
 
   const propertyPayload = {
-    ...payload,
-    status: PROPERTY_STATUS.ACTIVE,
-    publishedAt: new Date(),
+    ...propertyFields,
+    status: requestedStatus,
+    publishedAt:
+      requestedStatus === PROPERTY_STATUS.ACTIVE ? new Date() : null,
     owner: ownerId,
     images: uploadedImages.map((image) => ({
       url: image.secureUrl,
@@ -143,21 +260,31 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
   const uploadedImages = await uploadFiles(files, {
     folder: "werent/properties",
   });
+  const currentImages = property.images.map(serializePropertyImage);
+  const { existingImages, imageOrder, ...propertyPayload } = payload;
 
-  Object.assign(property, payload);
+  Object.assign(property, propertyPayload);
 
   if (property.status === PROPERTY_STATUS.ACTIVE && !property.publishedAt) {
     property.publishedAt = new Date();
   }
 
-  if (uploadedImages.length > 0) {
-    property.images = [
-      ...property.images,
-      ...uploadedImages.map((image) => ({
-        url: image.secureUrl,
-        publicId: image.publicId,
-      })),
-    ];
+  if (property.status === PROPERTY_STATUS.DRAFT) {
+    property.publishedAt = null;
+  }
+
+  if (
+    uploadedImages.length > 0 ||
+    Array.isArray(existingImages) ||
+    Array.isArray(imageOrder)
+  ) {
+    const nextImages = buildUpdatedPropertyImages(currentImages, uploadedImages, {
+      existingImages,
+      imageOrder,
+    });
+
+    property.images = nextImages;
+    await deleteRemovedPropertyImages(currentImages, nextImages);
   }
 
   await property.save();

@@ -45,6 +45,24 @@ const optionalStringArraySchema = z.preprocess(
   parseArrayField,
   z.array(z.string().trim()).optional(),
 );
+const propertyImageSchema = z.object({
+  publicId: z.string().trim().nullable().optional(),
+  url: z.string().trim().min(1),
+});
+const propertyImageOrderSchema = z.object({
+  fileIndex: z.coerce.number().int().min(0).optional(),
+  publicId: z.string().trim().nullable().optional(),
+  source: z.enum(["existing", "new"]),
+  url: z.string().trim().optional(),
+});
+const optionalPropertyImageArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(propertyImageSchema).optional(),
+);
+const optionalPropertyImageOrderArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(propertyImageOrderSchema).optional(),
+);
 
 const propertyCoordinatesSchema = z.preprocess(
   parseJsonField,
@@ -115,6 +133,10 @@ export const createPropertySchema = z.object({
 });
 
 export const updatePropertySchema = createPropertySchema
+  .extend({
+    existingImages: optionalPropertyImageArraySchema,
+    imageOrder: optionalPropertyImageOrderArraySchema,
+  })
   .partial()
   .superRefine((data, context) => {
     if (Object.keys(data).length === 0) {

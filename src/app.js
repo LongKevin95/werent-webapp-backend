@@ -8,6 +8,7 @@ import env from "./config/env.js";
 import { notFoundHandler } from "./middleware/errorHandler.js";
 import errorHandler from "./middleware/errorHandler.js";
 import { apiRateLimit } from "./middleware/rateLimit.js";
+import administrativeDivisionRouter from "./modules/administrative-divisions/administrative-division.routes.js";
 import adminRouter from "./modules/admin/admin.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import favoriteRouter from "./modules/favorites/favorite.routes.js";
@@ -160,6 +161,7 @@ app.use(apiRateLimit);
 
 app.use("/api/auth", authRouter);
 app.use("/api/users", userRouter);
+app.use("/api/administrative-divisions", administrativeDivisionRouter);
 app.use("/api/properties", propertyRouter);
 app.use("/api/favorites", favoriteRouter);
 app.use("/api/maps", mapRouter);
