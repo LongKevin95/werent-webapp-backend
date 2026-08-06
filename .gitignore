@@ -27,6 +27,7 @@ tmp/
 
 # Runtime files
 pids/
+uploads/
 *.pid
 *.seed
 *.pid.lock

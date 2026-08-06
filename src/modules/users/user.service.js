@@ -23,7 +23,18 @@ export async function updateProfile(userId, payload) {
 
   const nextEmail = User.normalizeEmail(payload.email);
   const nextPhone = User.normalizePhone(payload.phone);
+  const effectiveEmail =
+    payload.email !== undefined ? nextEmail : user.email;
+  const effectivePhone =
+    payload.phone !== undefined ? nextPhone : user.phone;
   const duplicateConditions = [];
+
+  if (!effectiveEmail && !effectivePhone) {
+    throw new ApiError(
+      400,
+      "Hồ sơ phải có ít nhất một email hoặc số điện thoại.",
+    );
+  }
 
   if (nextEmail && nextEmail !== user.email) {
     duplicateConditions.push({ email: nextEmail });
@@ -108,15 +119,35 @@ export async function updateAvatar(userId, file) {
 
   const [uploadedFile] = await uploadFiles([file], {
     folder: "werent/users/avatar",
+    transformation: [
+      {
+        width: 512,
+        height: 512,
+        crop: "fill",
+        gravity: "face",
+        quality: "auto",
+        fetch_format: "auto",
+      },
+    ],
   });
 
-  if (user.avatarPublicId) {
-    await deleteAsset(user.avatarPublicId);
-  }
-
+  const previousAvatarPublicId = user.avatarPublicId;
   user.avatarUrl = uploadedFile.secureUrl;
   user.avatarPublicId = uploadedFile.publicId;
-  await user.save();
+
+  try {
+    await user.save();
+  } catch (error) {
+    await deleteAsset(uploadedFile.publicId).catch(() => null);
+    throw error;
+  }
+
+  if (
+    previousAvatarPublicId &&
+    previousAvatarPublicId !== uploadedFile.publicId
+  ) {
+    await deleteAsset(previousAvatarPublicId).catch(() => null);
+  }
 
   return serializeUser(user);
 }

@@ -12,7 +12,12 @@ export default function validate(schema, target = "body") {
       );
     }
 
-    req[target] = parsed.data;
+    Object.defineProperty(req, target, {
+      configurable: true,
+      enumerable: true,
+      value: parsed.data,
+      writable: true,
+    });
     return next();
   };
 }
