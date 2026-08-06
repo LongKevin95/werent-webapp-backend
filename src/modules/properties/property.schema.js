@@ -5,18 +5,83 @@ import {
   PROPERTY_STATUS_LIST,
 } from "../../common/constants.js";
 
-const propertyCoordinatesSchema = z.object({
-  lat: z.coerce.number().min(-90).max(90),
-  lng: z.coerce.number().min(-180).max(180),
-});
+function parseJsonField(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
 
-const propertyPackageSchema = z.object({
-  tier: z.enum(PROPERTY_PACKAGE_TIER_LIST).optional(),
-  durationKey: z.string().trim().optional(),
-  durationDays: z.coerce.number().int().min(0).optional(),
-  pricePerDay: z.coerce.number().min(0).optional(),
-  totalPrice: z.coerce.number().min(0).optional(),
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(trimmedValue);
+  } catch {
+    return value;
+  }
+}
+
+function parseArrayField(value) {
+  const parsedValue = parseJsonField(value);
+
+  if (
+    parsedValue === undefined ||
+    parsedValue === null ||
+    parsedValue === ""
+  ) {
+    return undefined;
+  }
+
+  return Array.isArray(parsedValue) ? parsedValue : [parsedValue];
+}
+
+const optionalUnknownArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(z.unknown()).optional(),
+);
+const optionalStringArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(z.string().trim()).optional(),
+);
+const propertyImageSchema = z.object({
+  publicId: z.string().trim().nullable().optional(),
+  url: z.string().trim().min(1),
 });
+const propertyImageOrderSchema = z.object({
+  fileIndex: z.coerce.number().int().min(0).optional(),
+  publicId: z.string().trim().nullable().optional(),
+  source: z.enum(["existing", "new"]),
+  url: z.string().trim().optional(),
+});
+const optionalPropertyImageArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(propertyImageSchema).optional(),
+);
+const optionalPropertyImageOrderArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(propertyImageOrderSchema).optional(),
+);
+
+const propertyCoordinatesSchema = z.preprocess(
+  parseJsonField,
+  z.object({
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+  }),
+);
+
+const propertyPackageSchema = z.preprocess(
+  parseJsonField,
+  z.object({
+    tier: z.enum(PROPERTY_PACKAGE_TIER_LIST).optional(),
+    durationKey: z.string().trim().optional(),
+    durationDays: z.coerce.number().int().min(0).optional(),
+    pricePerDay: z.coerce.number().min(0).optional(),
+    totalPrice: z.coerce.number().min(0).optional(),
+  }),
+);
 
 export const createPropertySchema = z.object({
   title: z.string().trim().min(1, "Tiêu đề là bắt buộc"),
@@ -34,7 +99,7 @@ export const createPropertySchema = z.object({
   placeId: z.string().trim().nullable().optional(),
   mapProvider: z.string().trim().optional(),
   isPinAdjusted: z.coerce.boolean().optional(),
-  addressComponents: z.array(z.unknown()).optional(),
+  addressComponents: optionalUnknownArraySchema,
   coordinates: propertyCoordinatesSchema.optional(),
   price: z.coerce.number().min(0, "Giá phải lớn hơn hoặc bằng 0"),
   depositAmount: z.coerce.number().min(0).optional(),
@@ -50,12 +115,14 @@ export const createPropertySchema = z.object({
   moveInDays: z.coerce.number().int().min(0).optional(),
   waterPrice: z.string().trim().optional(),
   electricityPrice: z.string().trim().optional(),
+  internetPrice: z.string().trim().optional(),
   availableFrom: z.string().trim().optional(),
+  expiresAt: z.string().trim().optional(),
   minimumStayMonths: z.coerce.number().int().min(0).optional(),
   maxOccupants: z.coerce.number().int().min(0).optional(),
-  amenities: z.array(z.string().trim()).optional(),
-  nearbyPlaces: z.array(z.string().trim()).optional(),
-  houseRules: z.array(z.string().trim()).optional(),
+  amenities: optionalStringArraySchema,
+  nearbyPlaces: optionalStringArraySchema,
+  houseRules: optionalStringArraySchema,
   package: propertyPackageSchema.optional(),
   videoUrl: z.string().trim().optional(),
   contactName: z.string().trim().optional(),
@@ -66,6 +133,10 @@ export const createPropertySchema = z.object({
 });
 
 export const updatePropertySchema = createPropertySchema
+  .extend({
+    existingImages: optionalPropertyImageArraySchema,
+    imageOrder: optionalPropertyImageOrderArraySchema,
+  })
   .partial()
   .superRefine((data, context) => {
     if (Object.keys(data).length === 0) {
@@ -83,6 +154,11 @@ export const propertyQuerySchema = z.object({
   keyword: z.string().trim().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   page: z.coerce.number().int().min(1).default(1),
+});
+
+export const myPropertyQuerySchema = propertyQuerySchema.omit({
+  keyword: true,
+  owner: true,
 });
 
 export const updatePropertyStatusSchema = z

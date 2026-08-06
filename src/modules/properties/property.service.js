@@ -1,14 +1,127 @@
 import ApiError from "../../common/ApiError.js";
-import { PROPERTY_STATUS, ROLES } from "../../common/constants.js";
-import { uploadFiles } from "../../services/cloudinary.service.js";
+import {
+  PROPERTY_STATUS,
+  PROPERTY_STATUS_LIST,
+  ROLES,
+} from "../../common/constants.js";
+import { deleteAsset, uploadFiles } from "../../services/cloudinary.service.js";
 import Property from "./property.model.js";
 
-function buildQueryFilters(query) {
-  const filters = {};
+function serializePropertyImage(image) {
+  return {
+    publicId: image.publicId ?? null,
+    url: image.url,
+  };
+}
 
-  if (query.status) {
-    filters.status = query.status;
+function getPropertyImageKey(image) {
+  if (image.publicId) {
+    return `public:${image.publicId}`;
   }
+
+  return image.url ? `url:${image.url}` : "";
+}
+
+function getExistingImageFromMap(imageMap, image) {
+  const candidates = [
+    image.publicId ? `public:${image.publicId}` : "",
+    image.url ? `url:${image.url}` : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const existingImage = imageMap.get(candidate);
+
+    if (existingImage) {
+      return existingImage;
+    }
+  }
+
+  return null;
+}
+
+function mapUploadedImage(image) {
+  return {
+    url: image.secureUrl,
+    publicId: image.publicId,
+  };
+}
+
+function buildUpdatedPropertyImages(currentImages, uploadedImages, payload) {
+  const currentImageMap = new Map();
+  const uploadedPropertyImages = uploadedImages.map(mapUploadedImage);
+
+  currentImages.forEach((image) => {
+    if (image.publicId) {
+      currentImageMap.set(`public:${image.publicId}`, image);
+    }
+
+    if (image.url) {
+      currentImageMap.set(`url:${image.url}`, image);
+    }
+  });
+
+  if (Array.isArray(payload.imageOrder)) {
+    const usedExistingKeys = new Set();
+    const usedUploadIndexes = new Set();
+    const orderedImages = [];
+
+    payload.imageOrder.forEach((item) => {
+      if (item.source === "existing") {
+        const existingImage = getExistingImageFromMap(currentImageMap, item);
+        const existingKey = existingImage ? getPropertyImageKey(existingImage) : "";
+
+        if (existingImage && existingKey && !usedExistingKeys.has(existingKey)) {
+          orderedImages.push(existingImage);
+          usedExistingKeys.add(existingKey);
+        }
+        return;
+      }
+
+      const uploadedImage = uploadedPropertyImages[item.fileIndex];
+
+      if (uploadedImage && !usedUploadIndexes.has(item.fileIndex)) {
+        orderedImages.push(uploadedImage);
+        usedUploadIndexes.add(item.fileIndex);
+      }
+    });
+
+    uploadedPropertyImages.forEach((uploadedImage, index) => {
+      if (!usedUploadIndexes.has(index)) {
+        orderedImages.push(uploadedImage);
+      }
+    });
+
+    return orderedImages;
+  }
+
+  if (Array.isArray(payload.existingImages)) {
+    return [
+      ...payload.existingImages
+        .map((image) => getExistingImageFromMap(currentImageMap, image))
+        .filter(Boolean),
+      ...uploadedPropertyImages,
+    ];
+  }
+
+  return [...currentImages, ...uploadedPropertyImages];
+}
+
+async function deleteRemovedPropertyImages(currentImages, nextImages) {
+  const nextImageKeys = new Set(nextImages.map(getPropertyImageKey));
+
+  await Promise.all(
+    currentImages
+      .filter((image) => !nextImageKeys.has(getPropertyImageKey(image)))
+      .map((image) => image.publicId)
+      .filter(Boolean)
+      .map((publicId) => deleteAsset(publicId).catch(() => null)),
+  );
+}
+
+function buildQueryFilters(query) {
+  const filters = {
+    status: PROPERTY_STATUS.ACTIVE,
+  };
 
   if (query.owner) {
     filters.owner = query.owner;
@@ -51,6 +164,46 @@ export async function listProperties(query) {
   };
 }
 
+export async function listPropertiesByOwner(ownerId, query) {
+  const page = query.page ?? 1;
+  const limit = query.limit ?? 10;
+  const filters = { owner: ownerId };
+
+  if (query.status) {
+    filters.status = query.status;
+  }
+
+  const [items, total, statusCountEntries] = await Promise.all([
+    Property.find(filters)
+      .populate("owner", "fullName email phone roles")
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Property.countDocuments(filters),
+    Promise.all(
+      PROPERTY_STATUS_LIST.map(async (status) => [
+        status,
+        await Property.countDocuments({ owner: ownerId, status }),
+      ]),
+    ),
+  ]);
+  const statusCounts = Object.fromEntries(statusCountEntries);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+    statusCounts: {
+      all: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+      ...statusCounts,
+    },
+  };
+}
+
 export async function getPropertyById(propertyId) {
   const property = await Property.findById(propertyId).populate(
     "owner",
@@ -68,22 +221,23 @@ export async function createProperty(ownerId, payload, files = []) {
   const uploadedImages = await uploadFiles(files, {
     folder: "werent/properties",
   });
+  const requestedStatus =
+    payload.status === PROPERTY_STATUS.DRAFT
+      ? PROPERTY_STATUS.DRAFT
+      : PROPERTY_STATUS.ACTIVE;
+  const { status: _status, ...propertyFields } = payload;
 
   const propertyPayload = {
-    ...payload,
+    ...propertyFields,
+    status: requestedStatus,
+    publishedAt:
+      requestedStatus === PROPERTY_STATUS.ACTIVE ? new Date() : null,
     owner: ownerId,
     images: uploadedImages.map((image) => ({
       url: image.secureUrl,
       publicId: image.publicId,
     })),
   };
-
-  if (
-    propertyPayload.status === PROPERTY_STATUS.ACTIVE &&
-    !propertyPayload.publishedAt
-  ) {
-    propertyPayload.publishedAt = new Date();
-  }
 
   return Property.create(propertyPayload);
 }
@@ -106,21 +260,31 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
   const uploadedImages = await uploadFiles(files, {
     folder: "werent/properties",
   });
+  const currentImages = property.images.map(serializePropertyImage);
+  const { existingImages, imageOrder, ...propertyPayload } = payload;
 
-  Object.assign(property, payload);
+  Object.assign(property, propertyPayload);
 
   if (property.status === PROPERTY_STATUS.ACTIVE && !property.publishedAt) {
     property.publishedAt = new Date();
   }
 
-  if (uploadedImages.length > 0) {
-    property.images = [
-      ...property.images,
-      ...uploadedImages.map((image) => ({
-        url: image.secureUrl,
-        publicId: image.publicId,
-      })),
-    ];
+  if (property.status === PROPERTY_STATUS.DRAFT) {
+    property.publishedAt = null;
+  }
+
+  if (
+    uploadedImages.length > 0 ||
+    Array.isArray(existingImages) ||
+    Array.isArray(imageOrder)
+  ) {
+    const nextImages = buildUpdatedPropertyImages(currentImages, uploadedImages, {
+      existingImages,
+      imageOrder,
+    });
+
+    property.images = nextImages;
+    await deleteRemovedPropertyImages(currentImages, nextImages);
   }
 
   await property.save();
@@ -148,4 +312,29 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
 
   await property.save();
   return property;
+}
+
+export async function deleteProperty(propertyId, actor) {
+  const property = await Property.findById(propertyId);
+
+  if (!property) {
+    throw new ApiError(404, "Không tìm thấy tin đăng.");
+  }
+
+  const isOwner = property.owner.toString() === actor._id.toString();
+  const isAdmin =
+    Array.isArray(actor.roles) && actor.roles.includes(ROLES.ADMIN);
+
+  if (!isOwner && !isAdmin) {
+    throw new ApiError(403, "Bạn không thể xóa tin đăng này.");
+  }
+
+  await property.deleteOne();
+
+  await Promise.all(
+    property.images
+      .map((image) => image.publicId)
+      .filter(Boolean)
+      .map((publicId) => deleteAsset(publicId).catch(() => null)),
+  );
 }

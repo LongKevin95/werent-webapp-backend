@@ -2,11 +2,13 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import express from "express";
 import helmet from "helmet";
+import path from "node:path";
 import pinoHttp from "pino-http";
 import env from "./config/env.js";
 import { notFoundHandler } from "./middleware/errorHandler.js";
 import errorHandler from "./middleware/errorHandler.js";
 import { apiRateLimit } from "./middleware/rateLimit.js";
+import administrativeDivisionRouter from "./modules/administrative-divisions/administrative-division.routes.js";
 import adminRouter from "./modules/admin/admin.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import favoriteRouter from "./modules/favorites/favorite.routes.js";
@@ -154,10 +156,12 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use(apiRateLimit);
 
 app.use("/api/auth", authRouter);
 app.use("/api/users", userRouter);
+app.use("/api/administrative-divisions", administrativeDivisionRouter);
 app.use("/api/properties", propertyRouter);
 app.use("/api/favorites", favoriteRouter);
 app.use("/api/maps", mapRouter);

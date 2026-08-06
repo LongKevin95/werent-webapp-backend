@@ -1,8 +1,10 @@
 import asyncHandler from "../../common/asyncHandler.js";
 import {
   createProperty,
+  deleteProperty,
   getPropertyById,
   listProperties,
+  listPropertiesByOwner,
   updateProperty,
   updatePropertyStatus,
 } from "./property.service.js";
@@ -13,6 +15,16 @@ export const getProperties = asyncHandler(async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Lấy danh sách tin đăng thành công.",
+    data,
+  });
+});
+
+export const getMyProperties = asyncHandler(async (req, res) => {
+  const data = await listPropertiesByOwner(req.user._id, req.query);
+
+  return res.status(200).json({
+    success: true,
+    message: "Láº¥y danh sÃ¡ch tin Ä‘Äƒng cá»§a báº¡n thÃ nh cÃ´ng.",
     data,
   });
 });
@@ -59,5 +71,14 @@ export const reviewPropertyListing = asyncHandler(async (req, res) => {
     success: true,
     message: "Cập nhật trạng thái tin đăng thành công.",
     data: { property },
+  });
+});
+
+export const deletePropertyListing = asyncHandler(async (req, res) => {
+  await deleteProperty(req.params.propertyId, req.user);
+
+  return res.status(200).json({
+    success: true,
+    message: "Xóa tin đăng thành công.",
   });
 });
