@@ -44,7 +44,10 @@ export const createPropertyListing = asyncHandler(async (req, res) => {
 
   return res.status(201).json({
     success: true,
-    message: "Tạo tin đăng thành công.",
+    message:
+      property.status === "draft"
+        ? "Lưu bản nháp thành công."
+        : "Gửi tin đăng chờ duyệt thành công.",
     data: { property },
   });
 });

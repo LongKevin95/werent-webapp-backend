@@ -164,18 +164,19 @@ export const myPropertyQuerySchema = propertyQuerySchema.omit({
 export const updatePropertyStatusSchema = z
   .object({
     status: z.enum(PROPERTY_STATUS_LIST),
+    reason: z.string().trim().max(1000).optional(),
     rejectionReason: z.string().trim().optional(),
   })
   .superRefine((data, context) => {
     if (
-      data.status === PROPERTY_STATUS.REJECTED &&
+      [PROPERTY_STATUS.REJECTED, PROPERTY_STATUS.HIDDEN].includes(data.status) &&
+      !data.reason?.trim() &&
       !data.rejectionReason?.trim()
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          "Cần nhập lý do từ chối khi chuyển tin sang trạng thái vi phạm.",
-        path: ["rejectionReason"],
+        message: "Cần nhập lý do khi từ chối hoặc ẩn tin đăng.",
+        path: ["reason"],
       });
     }
   });

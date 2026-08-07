@@ -28,7 +28,7 @@ async function registerUser(email = "owner@example.com") {
   });
 }
 
-describe("property publishing shortcut", () => {
+describe("property publishing workflow", () => {
   beforeAll(async () => {
     mongoServer = await MongoMemoryServer.create();
     await mongoose.connect(mongoServer.getUri());
@@ -51,7 +51,7 @@ describe("property publishing shortcut", () => {
     await mongoServer?.stop();
   });
 
-  it("publishes new listings immediately while admin review is not available", async () => {
+  it("sends new listings to admin review before public display", async () => {
     const registerResponse = await registerUser();
     const token = registerResponse.body.data.accessToken;
 
@@ -70,11 +70,9 @@ describe("property publishing shortcut", () => {
 
     expect(createResponse.status).toBe(201);
     expect(createResponse.body.data.property.status).toBe(
-      PROPERTY_STATUS.ACTIVE,
+      PROPERTY_STATUS.PENDING,
     );
-    expect(createResponse.body.data.property.publishedAt).toEqual(
-      expect.any(String),
-    );
+    expect(createResponse.body.data.property.publishedAt).toBeNull();
 
     await Property.create({
       title: "Hidden draft studio",
@@ -90,23 +88,14 @@ describe("property publishing shortcut", () => {
       .query({ keyword: "studio" });
 
     expect(searchResponse.status).toBe(200);
-    expect(searchResponse.body.data.items).toHaveLength(1);
-    expect(searchResponse.body.data.items[0].title).toBe(
-      "Riverside studio for rent",
-    );
-    expect(searchResponse.body.data.items[0].status).toBe(
-      PROPERTY_STATUS.ACTIVE,
-    );
+    expect(searchResponse.body.data.items).toHaveLength(0);
 
     const draftSearchResponse = await request(app)
       .get("/api/properties")
       .query({ keyword: "studio", status: PROPERTY_STATUS.DRAFT });
 
     expect(draftSearchResponse.status).toBe(200);
-    expect(draftSearchResponse.body.data.items).toHaveLength(1);
-    expect(draftSearchResponse.body.data.items[0].status).toBe(
-      PROPERTY_STATUS.ACTIVE,
-    );
+    expect(draftSearchResponse.body.data.items).toHaveLength(0);
   });
 
   it("stores new listings as drafts when the wizard requests draft status", async () => {
@@ -179,7 +168,7 @@ describe("property publishing shortcut", () => {
 
     expect(createResponse.status).toBe(201);
     expect(createResponse.body.data.property.status).toBe(
-      PROPERTY_STATUS.ACTIVE,
+      PROPERTY_STATUS.PENDING,
     );
     expect(createResponse.body.data.property.amenities).toEqual([
       "wifi",
@@ -339,7 +328,7 @@ describe("property publishing shortcut", () => {
       city: "Thành phố Hồ Chí Minh",
       district: "Quận 1",
       description: "",
-      status: PROPERTY_STATUS.ACTIVE,
+      status: PROPERTY_STATUS.PENDING,
     });
     expect(updateResponse.body.data.property.images).toHaveLength(2);
     expect(updateResponse.body.data.property.images[0]).toMatchObject({
@@ -400,6 +389,30 @@ describe("property publishing shortcut", () => {
     expect(showResponse.body.data.property.publishedAt).toEqual(
       expect.any(String),
     );
+  });
+
+  it("prevents owners from bypassing admin review", async () => {
+    const ownerResponse = await registerUser();
+    const ownerId = ownerResponse.body.data.user.id;
+    const token = ownerResponse.body.data.accessToken;
+    const property = await Property.create({
+      title: "Pending admin decision",
+      propertyType: "Apartment",
+      address: "District 1",
+      price: 8000000,
+      owner: ownerId,
+      status: PROPERTY_STATUS.PENDING,
+    });
+
+    const response = await request(app)
+      .patch(`/api/properties/${property._id}`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: PROPERTY_STATUS.ACTIVE });
+
+    expect(response.status).toBe(400);
+    await expect(Property.findById(property._id).lean()).resolves.toMatchObject({
+      status: PROPERTY_STATUS.PENDING,
+    });
   });
 
   it("prevents users from updating another owner's listing", async () => {
