@@ -6,6 +6,7 @@ import {
   createAdminUser,
   deleteAdminUser,
   getAdminDashboard,
+  getAdminProperties,
   getAdminUser,
   getAdminUsers,
   reviewPropertyByAdmin,
@@ -13,6 +14,7 @@ import {
 } from "./admin.controller.js";
 import {
   createAdminUserSchema,
+  adminPropertyQuerySchema,
   reviewPropertySchema,
   updateAdminUserSchema,
 } from "./admin.schema.js";
@@ -21,6 +23,11 @@ const router = Router();
 
 router.use(requireAuth, requireAdmin);
 router.get("/dashboard", getAdminDashboard);
+router.get(
+  "/properties",
+  validate(adminPropertyQuerySchema, "query"),
+  getAdminProperties,
+);
 router.get("/users", getAdminUsers);
 router.post("/users", validate(createAdminUserSchema), createAdminUser);
 router.get("/users/:userId", getAdminUser);

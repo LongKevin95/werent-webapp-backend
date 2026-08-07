@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import ApiError from "../../common/ApiError.js";
+import { PROPERTY_STATUS_LIST } from "../../common/constants.js";
 import { serializeUser } from "../auth/auth.service.js";
 import PaymentOrder from "../payments/payment.model.js";
 import Property from "../properties/property.model.js";
@@ -119,6 +120,81 @@ export async function listUsers(query = {}) {
       limit,
       total,
       totalPages: Math.max(Math.ceil(total / limit), 1),
+    },
+  };
+}
+
+export async function listPropertiesForAdmin(query = {}) {
+  const page = query.page ?? 1;
+  const limit = query.limit ?? 10;
+  const filter = {};
+  const search = typeof query.search === "string" ? query.search.trim() : "";
+
+  if (query.status) filter.status = query.status;
+  if (query.propertyType) filter.propertyType = query.propertyType;
+  if (query.city) filter.city = query.city;
+
+  if (query.dateFrom || query.dateTo) {
+    filter.createdAt = {};
+    if (query.dateFrom) filter.createdAt.$gte = query.dateFrom;
+    if (query.dateTo) {
+      const endOfDay = new Date(query.dateTo);
+      endOfDay.setHours(23, 59, 59, 999);
+      filter.createdAt.$lte = endOfDay;
+    }
+  }
+
+  if (search) {
+    const pattern = new RegExp(escapeRegExp(search), "i");
+    const owners = await User.find({
+      $or: [{ fullName: pattern }, { email: pattern }, { phone: pattern }],
+    }).select("_id");
+
+    filter.$or = [
+      { title: pattern },
+      { description: pattern },
+      { address: pattern },
+      { projectName: pattern },
+      { owner: { $in: owners.map((owner) => owner._id) } },
+    ];
+  }
+
+  const [items, total, statusCountEntries, propertyTypes, cities] =
+    await Promise.all([
+      Property.find(filter)
+        .populate("owner", "fullName email phone avatarUrl roles")
+        .populate("reviewedBy", "fullName email")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit),
+      Property.countDocuments(filter),
+      Promise.all(
+        PROPERTY_STATUS_LIST.map(async (status) => [
+          status,
+          await Property.countDocuments({ status }),
+        ]),
+      ),
+      Property.distinct("propertyType"),
+      Property.distinct("city"),
+    ]);
+
+  const statusCounts = Object.fromEntries(statusCountEntries);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
+    statusCounts: {
+      all: Object.values(statusCounts).reduce((sum, count) => sum + count, 0),
+      ...statusCounts,
+    },
+    filters: {
+      propertyTypes: propertyTypes.filter(Boolean).sort(),
+      cities: cities.filter(Boolean).sort(),
     },
   };
 }

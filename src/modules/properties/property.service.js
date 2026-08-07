@@ -224,7 +224,7 @@ export async function createProperty(ownerId, payload, files = []) {
   const requestedStatus =
     payload.status === PROPERTY_STATUS.DRAFT
       ? PROPERTY_STATUS.DRAFT
-      : PROPERTY_STATUS.ACTIVE;
+      : PROPERTY_STATUS.PENDING;
   const { status: _status, ...propertyFields } = payload;
 
   const propertyPayload = {
@@ -257,6 +257,30 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
     throw new ApiError(403, "Bạn không thể chỉnh sửa tin đăng này.");
   }
 
+  const payloadKeys = Object.keys(payload).filter(
+    (key) => !["existingImages", "imageOrder"].includes(key),
+  );
+  const isStatusOnlyUpdate =
+    files.length === 0 && payloadKeys.length === 1 && payloadKeys[0] === "status";
+
+  if (!isAdmin && isStatusOnlyUpdate) {
+    const isAllowedVisibilityTransition =
+      (property.status === PROPERTY_STATUS.ACTIVE &&
+        payload.status === PROPERTY_STATUS.HIDDEN) ||
+      (property.status === PROPERTY_STATUS.HIDDEN &&
+        payload.status === PROPERTY_STATUS.ACTIVE &&
+        !property.moderationReason);
+
+    if (!isAllowedVisibilityTransition && payload.status !== PROPERTY_STATUS.DRAFT) {
+      throw new ApiError(
+        400,
+        property.status === PROPERTY_STATUS.HIDDEN && property.moderationReason
+          ? "Tin đã bị quản trị viên ẩn. Vui lòng chỉnh sửa và gửi duyệt lại."
+          : "Trạng thái tin đăng này chỉ có thể được cập nhật bởi quản trị viên.",
+      );
+    }
+  }
+
   const uploadedImages = await uploadFiles(files, {
     folder: "werent/properties",
   });
@@ -264,6 +288,22 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
   const { existingImages, imageOrder, ...propertyPayload } = payload;
 
   Object.assign(property, propertyPayload);
+
+  const hasContentChanges =
+    !isAdmin &&
+    (files.length > 0 ||
+      payloadKeys.some((key) => key !== "status") ||
+      Array.isArray(existingImages) ||
+      Array.isArray(imageOrder));
+
+  if (hasContentChanges && payload.status !== PROPERTY_STATUS.DRAFT) {
+    property.status = PROPERTY_STATUS.PENDING;
+    property.publishedAt = null;
+    property.rejectionReason = null;
+    property.moderationReason = null;
+    property.reviewedBy = null;
+    property.reviewedAt = null;
+  }
 
   if (property.status === PROPERTY_STATUS.ACTIVE && !property.publishedAt) {
     property.publishedAt = new Date();
@@ -299,15 +339,26 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
   }
 
   property.status = payload.status;
+  const moderationReason = payload.reason ?? payload.rejectionReason ?? null;
+  property.moderationReason = [
+    PROPERTY_STATUS.REJECTED,
+    PROPERTY_STATUS.HIDDEN,
+  ].includes(payload.status)
+    ? moderationReason
+    : null;
   property.rejectionReason =
     payload.status === PROPERTY_STATUS.REJECTED
-      ? (payload.rejectionReason ?? null)
+      ? moderationReason
       : null;
   property.reviewedBy = reviewerId;
   property.reviewedAt = new Date();
 
   if (payload.status === PROPERTY_STATUS.ACTIVE && !property.publishedAt) {
     property.publishedAt = new Date();
+  }
+
+  if (payload.status === PROPERTY_STATUS.PENDING) {
+    property.publishedAt = null;
   }
 
   await property.save();

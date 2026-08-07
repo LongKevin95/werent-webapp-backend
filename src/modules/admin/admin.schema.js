@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { PROPERTY_STATUS_LIST, ROLE_LIST } from "../../common/constants.js";
+import {
+  PROPERTY_STATUS,
+  PROPERTY_STATUS_LIST,
+  ROLE_LIST,
+} from "../../common/constants.js";
 import {
   INVALID_PHONE_MESSAGE,
   normalizeVietnamPhone,
@@ -35,10 +39,38 @@ function validateContactFields(data, context, { requireContact = false } = {}) {
   }
 }
 
-export const reviewPropertySchema = z.object({
-  status: z.enum(PROPERTY_STATUS_LIST),
-  rejectionReason: z.string().trim().optional(),
+export const adminPropertyQuerySchema = z.object({
+  status: z.enum(PROPERTY_STATUS_LIST).optional(),
+  search: z.string().trim().optional(),
+  propertyType: z.string().trim().optional(),
+  city: z.string().trim().optional(),
+  dateFrom: z.coerce.date().optional(),
+  dateTo: z.coerce.date().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  page: z.coerce.number().int().min(1).default(1),
 });
+
+export const reviewPropertySchema = z
+  .object({
+    status: z.enum([
+      PROPERTY_STATUS.ACTIVE,
+      PROPERTY_STATUS.REJECTED,
+      PROPERTY_STATUS.HIDDEN,
+    ]),
+    reason: z.string().trim().max(1000).optional(),
+  })
+  .superRefine((data, context) => {
+    if (
+      [PROPERTY_STATUS.REJECTED, PROPERTY_STATUS.HIDDEN].includes(data.status) &&
+      !data.reason
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cần nhập lý do khi từ chối hoặc ẩn tin đăng.",
+        path: ["reason"],
+      });
+    }
+  });
 
 export const createAdminUserSchema = z
   .object({

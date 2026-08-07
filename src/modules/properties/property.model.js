@@ -336,6 +336,11 @@ const propertySchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    moderationReason: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     reviewedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -4,6 +4,7 @@ import {
   createUser,
   deleteUser,
   getDashboardSummary,
+  listPropertiesForAdmin,
   getUserById,
   listUsers,
   updateUser,
@@ -25,6 +26,16 @@ export const getAdminUsers = asyncHandler(async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Lấy danh sách người dùng thành công.",
+    data: result,
+  });
+});
+
+export const getAdminProperties = asyncHandler(async (req, res) => {
+  const result = await listPropertiesForAdmin(req.query);
+
+  return res.status(200).json({
+    success: true,
+    message: "Lấy danh sách tin đăng thành công.",
     data: result,
   });
 });
@@ -74,7 +85,12 @@ export const reviewPropertyByAdmin = asyncHandler(async (req, res) => {
 
   return res.status(200).json({
     success: true,
-    message: "Duyệt tin thành công.",
+    message:
+      req.body.status === "active"
+        ? "Duyệt tin thành công."
+        : req.body.status === "rejected"
+          ? "Từ chối tin thành công."
+          : "Ẩn tin thành công.",
     data: { property },
   });
 });
