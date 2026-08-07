@@ -1,26 +1,152 @@
 import { z } from "zod";
-import { PROPERTY_STATUS_LIST } from "../../common/constants.js";
+import {
+  PROPERTY_PACKAGE_TIER_LIST,
+  PROPERTY_STATUS,
+  PROPERTY_STATUS_LIST,
+} from "../../common/constants.js";
+
+function parseJsonField(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return undefined;
+  }
+
+  try {
+    return JSON.parse(trimmedValue);
+  } catch {
+    return value;
+  }
+}
+
+function parseArrayField(value) {
+  const parsedValue = parseJsonField(value);
+
+  if (
+    parsedValue === undefined ||
+    parsedValue === null ||
+    parsedValue === ""
+  ) {
+    return undefined;
+  }
+
+  return Array.isArray(parsedValue) ? parsedValue : [parsedValue];
+}
+
+const optionalUnknownArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(z.unknown()).optional(),
+);
+const optionalStringArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(z.string().trim()).optional(),
+);
+const propertyImageSchema = z.object({
+  publicId: z.string().trim().nullable().optional(),
+  url: z.string().trim().min(1),
+});
+const propertyImageOrderSchema = z.object({
+  fileIndex: z.coerce.number().int().min(0).optional(),
+  publicId: z.string().trim().nullable().optional(),
+  source: z.enum(["existing", "new"]),
+  url: z.string().trim().optional(),
+});
+const optionalPropertyImageArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(propertyImageSchema).optional(),
+);
+const optionalPropertyImageOrderArraySchema = z.preprocess(
+  parseArrayField,
+  z.array(propertyImageOrderSchema).optional(),
+);
+
+const propertyCoordinatesSchema = z.preprocess(
+  parseJsonField,
+  z.object({
+    lat: z.coerce.number().min(-90).max(90),
+    lng: z.coerce.number().min(-180).max(180),
+  }),
+);
+
+const propertyPackageSchema = z.preprocess(
+  parseJsonField,
+  z.object({
+    tier: z.enum(PROPERTY_PACKAGE_TIER_LIST).optional(),
+    durationKey: z.string().trim().optional(),
+    durationDays: z.coerce.number().int().min(0).optional(),
+    pricePerDay: z.coerce.number().min(0).optional(),
+    totalPrice: z.coerce.number().min(0).optional(),
+  }),
+);
 
 export const createPropertySchema = z.object({
   title: z.string().trim().min(1, "Tiêu đề là bắt buộc"),
+  propertyType: z.string().trim().min(1, "Loại hình là bắt buộc"),
   description: z.string().trim().optional(),
   address: z.string().trim().min(1, "Địa chỉ là bắt buộc"),
+  city: z.string().trim().optional(),
+  district: z.string().trim().optional(),
+  ward: z.string().trim().optional(),
+  street: z.string().trim().optional(),
+  addressLine: z.string().trim().optional(),
+  projectName: z.string().trim().optional(),
+  locationNote: z.string().trim().optional(),
+  formattedAddress: z.string().trim().optional(),
+  placeId: z.string().trim().nullable().optional(),
+  mapProvider: z.string().trim().optional(),
+  isPinAdjusted: z.coerce.boolean().optional(),
+  addressComponents: optionalUnknownArraySchema,
+  coordinates: propertyCoordinatesSchema.optional(),
   price: z.coerce.number().min(0, "Giá phải lớn hơn hoặc bằng 0"),
+  depositAmount: z.coerce.number().min(0).optional(),
   area: z.coerce.number().min(0).optional(),
   bedrooms: z.coerce.number().int().min(0).optional(),
   bathrooms: z.coerce.number().int().min(0).optional(),
+  furnishing: z.string().trim().optional(),
+  orientation: z.string().trim().optional(),
+  floor: z.string().trim().optional(),
+  totalFloors: z.coerce.number().int().min(0).optional(),
+  frontage: z.coerce.number().min(0).optional(),
+  accessRoad: z.coerce.number().min(0).optional(),
+  moveInDays: z.coerce.number().int().min(0).optional(),
+  waterPrice: z.string().trim().optional(),
+  electricityPrice: z.string().trim().optional(),
+  internetPrice: z.string().trim().optional(),
+  availableFrom: z.string().trim().optional(),
+  expiresAt: z.string().trim().optional(),
+  minimumStayMonths: z.coerce.number().int().min(0).optional(),
+  maxOccupants: z.coerce.number().int().min(0).optional(),
+  amenities: optionalStringArraySchema,
+  nearbyPlaces: optionalStringArraySchema,
+  houseRules: optionalStringArraySchema,
+  package: propertyPackageSchema.optional(),
+  videoUrl: z.string().trim().optional(),
+  contactName: z.string().trim().optional(),
+  contactPhone: z.string().trim().optional(),
+  contactEmail: z.string().trim().email().optional(),
+  isFeatured: z.coerce.boolean().optional(),
   status: z.enum(PROPERTY_STATUS_LIST).optional(),
 });
 
-export const updatePropertySchema = createPropertySchema.partial().superRefine((data, context) => {
-  if (Object.keys(data).length === 0) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Cần ít nhất một trường để cập nhật.",
-      path: ["body"],
-    });
-  }
-});
+export const updatePropertySchema = createPropertySchema
+  .extend({
+    existingImages: optionalPropertyImageArraySchema,
+    imageOrder: optionalPropertyImageOrderArraySchema,
+  })
+  .partial()
+  .superRefine((data, context) => {
+    if (Object.keys(data).length === 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cần ít nhất một trường để cập nhật.",
+        path: ["body"],
+      });
+    }
+  });
 
 export const propertyQuerySchema = z.object({
   status: z.enum(PROPERTY_STATUS_LIST).optional(),
@@ -30,7 +156,27 @@ export const propertyQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
 });
 
-export const updatePropertyStatusSchema = z.object({
-  status: z.enum(PROPERTY_STATUS_LIST),
-  rejectionReason: z.string().trim().optional(),
+export const myPropertyQuerySchema = propertyQuerySchema.omit({
+  keyword: true,
+  owner: true,
 });
+
+export const updatePropertyStatusSchema = z
+  .object({
+    status: z.enum(PROPERTY_STATUS_LIST),
+    reason: z.string().trim().max(1000).optional(),
+    rejectionReason: z.string().trim().optional(),
+  })
+  .superRefine((data, context) => {
+    if (
+      [PROPERTY_STATUS.REJECTED, PROPERTY_STATUS.HIDDEN].includes(data.status) &&
+      !data.reason?.trim() &&
+      !data.rejectionReason?.trim()
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Cần nhập lý do khi từ chối hoặc ẩn tin đăng.",
+        path: ["reason"],
+      });
+    }
+  });

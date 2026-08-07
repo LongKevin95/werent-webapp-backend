@@ -3,7 +3,7 @@ import { ROLES } from "../common/constants.js";
 import { connectDatabase, disconnectDatabase } from "../config/db.js";
 import User from "../modules/users/user.model.js";
 
-const TEMP_PASSWORD = "123456";
+const TEMP_PASSWORD = "12345678";
 
 const seedUsers = [
   {

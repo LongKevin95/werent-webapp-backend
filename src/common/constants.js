@@ -8,13 +8,24 @@ export const ROLE_LIST = Object.freeze(Object.values(ROLES));
 export const PROPERTY_STATUS = Object.freeze({
   DRAFT: "draft",
   PENDING: "pending",
-  APPROVED: "approved",
+  ACTIVE: "active",
   REJECTED: "rejected",
   HIDDEN: "hidden",
 });
 
 export const PROPERTY_STATUS_LIST = Object.freeze(
   Object.values(PROPERTY_STATUS),
+);
+
+export const PROPERTY_PACKAGE_TIER = Object.freeze({
+  STANDARD: "standard",
+  VIP_SILVER: "vipSilver",
+  VIP_GOLD: "vipGold",
+  VIP_DIAMOND: "vipDiamond",
+});
+
+export const PROPERTY_PACKAGE_TIER_LIST = Object.freeze(
+  Object.values(PROPERTY_PACKAGE_TIER),
 );
 
 export const ORDER_STATUS = Object.freeze({
