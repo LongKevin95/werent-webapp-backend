@@ -199,6 +199,32 @@ describe("property publishing workflow", () => {
     );
   });
 
+  it("ignores image URLs submitted to the public create endpoint", async () => {
+    const registerResponse = await registerUser();
+    const token = registerResponse.body.data.accessToken;
+
+    const createResponse = await request(app)
+      .post("/api/properties")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Attempted remote image listing",
+        propertyType: "Apartment",
+        address: "123 Test Street",
+        city: "TP. Ho Chi Minh",
+        district: "District 1",
+        price: 9000000,
+        images: [
+          {
+            url: "https://example.com/not-allowed.jpg",
+            publicId: null,
+          },
+        ],
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.data.property.images).toEqual([]);
+  });
+
   it("returns only the authenticated owner's listings with pagination", async () => {
     const ownerResponse = await registerUser();
     const otherOwnerResponse = await registerUser("other-owner@example.com");

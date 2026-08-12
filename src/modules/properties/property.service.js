@@ -68,9 +68,15 @@ function buildUpdatedPropertyImages(currentImages, uploadedImages, payload) {
     payload.imageOrder.forEach((item) => {
       if (item.source === "existing") {
         const existingImage = getExistingImageFromMap(currentImageMap, item);
-        const existingKey = existingImage ? getPropertyImageKey(existingImage) : "";
+        const existingKey = existingImage
+          ? getPropertyImageKey(existingImage)
+          : "";
 
-        if (existingImage && existingKey && !usedExistingKeys.has(existingKey)) {
+        if (
+          existingImage &&
+          existingKey &&
+          !usedExistingKeys.has(existingKey)
+        ) {
           orderedImages.push(existingImage);
           usedExistingKeys.add(existingKey);
         }
@@ -230,8 +236,7 @@ export async function createProperty(ownerId, payload, files = []) {
   const propertyPayload = {
     ...propertyFields,
     status: requestedStatus,
-    publishedAt:
-      requestedStatus === PROPERTY_STATUS.ACTIVE ? new Date() : null,
+    publishedAt: requestedStatus === PROPERTY_STATUS.ACTIVE ? new Date() : null,
     owner: ownerId,
     images: uploadedImages.map((image) => ({
       url: image.secureUrl,
@@ -261,7 +266,9 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
     (key) => !["existingImages", "imageOrder"].includes(key),
   );
   const isStatusOnlyUpdate =
-    files.length === 0 && payloadKeys.length === 1 && payloadKeys[0] === "status";
+    files.length === 0 &&
+    payloadKeys.length === 1 &&
+    payloadKeys[0] === "status";
 
   if (!isAdmin && isStatusOnlyUpdate) {
     const isAllowedVisibilityTransition =
@@ -271,7 +278,10 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
         payload.status === PROPERTY_STATUS.ACTIVE &&
         !property.moderationReason);
 
-    if (!isAllowedVisibilityTransition && payload.status !== PROPERTY_STATUS.DRAFT) {
+    if (
+      !isAllowedVisibilityTransition &&
+      payload.status !== PROPERTY_STATUS.DRAFT
+    ) {
       throw new ApiError(
         400,
         property.status === PROPERTY_STATUS.HIDDEN && property.moderationReason
@@ -318,10 +328,14 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
     Array.isArray(existingImages) ||
     Array.isArray(imageOrder)
   ) {
-    const nextImages = buildUpdatedPropertyImages(currentImages, uploadedImages, {
-      existingImages,
-      imageOrder,
-    });
+    const nextImages = buildUpdatedPropertyImages(
+      currentImages,
+      uploadedImages,
+      {
+        existingImages,
+        imageOrder,
+      },
+    );
 
     property.images = nextImages;
     await deleteRemovedPropertyImages(currentImages, nextImages);
@@ -347,9 +361,7 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
     ? moderationReason
     : null;
   property.rejectionReason =
-    payload.status === PROPERTY_STATUS.REJECTED
-      ? moderationReason
-      : null;
+    payload.status === PROPERTY_STATUS.REJECTED ? moderationReason : null;
   property.reviewedBy = reviewerId;
   property.reviewedAt = new Date();
 
