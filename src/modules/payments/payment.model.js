@@ -24,6 +24,23 @@ const paymentOrderSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    orderType: {
+      type: String,
+      enum: ["package", "wallet_top_up"],
+      default: "package",
+      index: true,
+    },
+    note: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 500,
+    },
+    paymentMethod: {
+      type: String,
+      default: "BANK_TRANSFER",
+      trim: true,
+    },
     orderCode: {
       type: String,
       required: true,
@@ -38,6 +55,19 @@ const paymentOrderSchema = new mongoose.Schema(
     providerTransactionId: {
       type: String,
       default: null,
+    },
+    providerOrderId: {
+      type: String,
+      default: null,
+    },
+    paidAt: {
+      type: Date,
+      default: null,
+    },
+    expiresAt: {
+      type: Date,
+      default: null,
+      index: true,
     },
     status: {
       type: String,

@@ -12,6 +12,9 @@ process.env.JWT_SECRET = "integration-test-secret";
 const { default: app } = await import("../src/app.js");
 const { default: Property } =
   await import("../src/modules/properties/property.model.js");
+const { default: WalletTransaction } = await import(
+  "../src/modules/payments/wallet-transaction.model.js"
+);
 
 let mongoServer;
 const tinyPngBuffer = Buffer.from(
@@ -132,6 +135,14 @@ describe("property publishing workflow", () => {
   it("accepts multipart payloads from the post listing wizard", async () => {
     const registerResponse = await registerUser();
     const token = registerResponse.body.data.accessToken;
+    await WalletTransaction.create({
+      user: registerResponse.body.data.user.id,
+      type: "top_up",
+      direction: "credit",
+      amount: 100000,
+      realAmount: 100000,
+      description: "Test wallet top-up",
+    });
 
     const createResponse = await request(app)
       .post("/api/properties")

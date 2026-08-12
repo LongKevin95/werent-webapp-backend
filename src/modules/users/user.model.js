@@ -62,6 +62,16 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    walletBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    walletPromotionBalance: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     isActive: {
       type: Boolean,
       default: true,

@@ -13,6 +13,8 @@ export function serializeUser(user) {
     phone: user.phone ?? null,
     roles: user.roles,
     avatarUrl: user.avatarUrl ?? null,
+    walletBalance: user.walletBalance ?? 0,
+    walletPromotionBalance: user.walletPromotionBalance ?? 0,
     isActive: user.isActive,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
