@@ -24,6 +24,16 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: optionalString,
   GEOAPIFY_API_KEY: optionalString,
   SEPAY_API_KEY: optionalString,
+  SEPAY_MERCHANT_ID: optionalString,
+  SEPAY_SECRET_KEY: optionalString,
+  SEPAY_IPN_SECRET: optionalString,
+  SEPAY_CURRENCY: z.string().trim().min(1).default("VND"),
+  SEPAY_CHECKOUT_URL: z
+    .string()
+    .trim()
+    .url()
+    .default("https://pay.sepay.vn/v1/checkout/init"),
+  SEPAY_PAYMENT_EXPIRY_MINUTES: z.coerce.number().int().positive().default(30),
   SEPAY_WEBHOOK_SECRET: optionalString,
   SEPAY_BANK_BIN: optionalString,
   SEPAY_BANK_ACCOUNT: optionalString,

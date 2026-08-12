@@ -4,15 +4,13 @@ export const createPaymentOrderSchema = z.object({
   packageCode: z.string().trim().min(1, "packageCode là bắt buộc"),
 });
 
-export const sepayWebhookSchema = z.object({
-  orderCode: z.string().trim().optional(),
-  code: z.string().trim().optional(),
-  reference: z.string().trim().optional(),
-  content: z.string().trim().optional(),
-  amount: z.union([z.string(), z.number()]).optional(),
-  transferAmount: z.union([z.string(), z.number()]).optional(),
-  transactionId: z.string().trim().optional(),
-  gatewayTransactionId: z.string().trim().optional(),
-  id: z.union([z.string(), z.number()]).optional(),
-  status: z.string().trim().optional(),
+export const createWalletTopUpCheckoutSchema = z.object({
+  amount: z.coerce
+    .number()
+    .int("Số tiền nạp phải là số nguyên.")
+    .min(10000, "Số tiền nạp tối thiểu là 10.000 đ."),
+  note: z.string().trim().max(500, "Ghi chú không được vượt quá 500 ký tự.").optional(),
+  paymentMethod: z.enum(["qr"]).default("qr"),
 });
+
+export const sepayWebhookSchema = z.object({}).passthrough();

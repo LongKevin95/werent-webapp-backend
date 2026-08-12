@@ -5,6 +5,10 @@ import {
   ROLES,
 } from "../../common/constants.js";
 import { deleteAsset, uploadFiles } from "../../services/cloudinary.service.js";
+import {
+  assertWalletCanSpend,
+  spendWalletForListing,
+} from "../payments/wallet.service.js";
 import Property from "./property.model.js";
 
 function serializePropertyImage(image) {
@@ -224,13 +228,20 @@ export async function getPropertyById(propertyId) {
 }
 
 export async function createProperty(ownerId, payload, files = []) {
-  const uploadedImages = await uploadFiles(files, {
-    folder: "werent/properties",
-  });
   const requestedStatus =
     payload.status === PROPERTY_STATUS.DRAFT
       ? PROPERTY_STATUS.DRAFT
       : PROPERTY_STATUS.PENDING;
+  const listingPackagePrice =
+    requestedStatus === PROPERTY_STATUS.DRAFT
+      ? 0
+      : Number(payload.package?.totalPrice ?? 0);
+
+  await assertWalletCanSpend(ownerId, listingPackagePrice);
+
+  const uploadedImages = await uploadFiles(files, {
+    folder: "werent/properties",
+  });
   const { status: _status, ...propertyFields } = payload;
 
   const propertyPayload = {
@@ -244,7 +255,29 @@ export async function createProperty(ownerId, payload, files = []) {
     })),
   };
 
-  return Property.create(propertyPayload);
+  const property = await Property.create(propertyPayload);
+
+  try {
+    await spendWalletForListing(ownerId, listingPackagePrice, {
+      description: "Thanh toán gói đăng tin",
+      propertyId: property._id,
+      metadata: {
+        package: property.package,
+        propertyTitle: property.title,
+      },
+    });
+  } catch (error) {
+    await property.deleteOne().catch(() => null);
+    await Promise.all(
+      uploadedImages
+        .map((image) => image.publicId)
+        .filter(Boolean)
+        .map((publicId) => deleteAsset(publicId).catch(() => null)),
+    );
+    throw error;
+  }
+
+  return property;
 }
 
 export async function updateProperty(propertyId, actor, payload, files = []) {
