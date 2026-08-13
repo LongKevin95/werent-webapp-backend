@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 import {
+  LISTING_VERIFICATION_STATUS,
+  LISTING_VERIFICATION_STATUS_LIST,
   PROPERTY_PACKAGE_TIER,
   PROPERTY_PACKAGE_TIER_LIST,
   PROPERTY_STATUS,
@@ -362,6 +364,19 @@ const propertySchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    verificationStatus: {
+      type: String,
+      enum: LISTING_VERIFICATION_STATUS_LIST,
+      default: LISTING_VERIFICATION_STATUS.UNVERIFIED,
+      index: true,
+    },
+    verifiedAt: { type: Date, default: null },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    qualityScore: { type: Number, default: 0, min: 0 },
   },
   {
     timestamps: true,

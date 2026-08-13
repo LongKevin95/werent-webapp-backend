@@ -4,7 +4,6 @@ import User from "../users/user.model.js";
 import PaymentOrder from "./payment.model.js";
 import WalletTransaction from "./wallet-transaction.model.js";
 
-const TEST_TOP_UP_PROMOTION_RATE = 0.1;
 const TEST_TOP_UP_PROMOTION_DAYS = 30;
 
 function addDays(date, days) {
@@ -13,8 +12,8 @@ function addDays(date, days) {
   return nextDate;
 }
 
-function calculateTopUpPromotionAmount(amount) {
-  return Math.floor(Number(amount || 0) * TEST_TOP_UP_PROMOTION_RATE);
+function calculateTopUpPromotionAmount(order) {
+  return Math.max(Number(order.bonusAmount ?? 0), 0);
 }
 
 function getTopUpPromotionExpiresAt(order) {
@@ -77,6 +76,11 @@ async function getWalletTotals(userId) {
         summary.walletPromotionBalance += transaction.promotionAmount ?? 0;
       }
 
+      if (transaction.type === "admin_adjustment") {
+        const adjustedAmount = transaction.realAmount ?? transaction.amount ?? 0;
+        summary.walletBalance += transaction.direction === "credit" ? adjustedAmount : -adjustedAmount;
+      }
+
       return summary;
     },
     {
@@ -126,7 +130,7 @@ export async function reconcileWalletTopUps(userId) {
       });
     }
 
-    const promotionAmount = calculateTopUpPromotionAmount(order.amount);
+    const promotionAmount = calculateTopUpPromotionAmount(order);
     const existingPromotion = await WalletTransaction.exists({
       paymentOrder: order._id,
       type: "promotion_credit",
@@ -145,7 +149,7 @@ export async function reconcileWalletTopUps(userId) {
         expiresAt: getTopUpPromotionExpiresAt(order),
         metadata: {
           orderCode: order.orderCode,
-          promotionRate: TEST_TOP_UP_PROMOTION_RATE,
+          promotionName: order.promotionName ?? null,
           promotionDays: TEST_TOP_UP_PROMOTION_DAYS,
         },
       });
@@ -171,7 +175,7 @@ export async function getWalletOverview(userId) {
       totalDeposited: totals.totalDeposited,
       totalSpent: totals.totalSpent,
       promotionPolicy: {
-        rate: TEST_TOP_UP_PROMOTION_RATE,
+        rate: null,
         expiresInDays: TEST_TOP_UP_PROMOTION_DAYS,
       },
     },
@@ -180,7 +184,35 @@ export async function getWalletOverview(userId) {
 }
 
 export async function creditWalletTopUp(order) {
-  await reconcileWalletTopUps(order.user);
+  return reconcileWalletTopUps(order.user);
+}
+
+export async function adjustWalletBalance(userId, direction, amount, metadata = {}) {
+  const totals = await reconcileWalletTopUps(userId);
+  const normalizedAmount = Number(amount);
+  if (direction === "debit" && totals.walletBalance < normalizedAmount) {
+    throw new ApiError(400, "Số dư không đủ để thực hiện điều chỉnh giảm.");
+  }
+
+  const balanceBefore = totals.walletBalance + totals.walletPromotionBalance;
+  const nextWalletBalance = totals.walletBalance + (direction === "credit" ? normalizedAmount : -normalizedAmount);
+  const balanceAfter = nextWalletBalance + totals.walletPromotionBalance;
+  const transaction = await WalletTransaction.create({
+    user: userId,
+    type: "admin_adjustment",
+    direction,
+    amount: normalizedAmount,
+    realAmount: normalizedAmount,
+    balanceAfter: nextWalletBalance,
+    promotionBalanceAfter: totals.walletPromotionBalance,
+    description: metadata.reason ?? "Điều chỉnh số dư bởi quản trị viên",
+    metadata,
+  });
+  await updateUserWalletSnapshot(userId, {
+    walletBalance: nextWalletBalance,
+    walletPromotionBalance: totals.walletPromotionBalance,
+  });
+  return { transaction, balanceBefore, balanceAfter };
 }
 
 export async function assertWalletCanSpend(userId, amount) {

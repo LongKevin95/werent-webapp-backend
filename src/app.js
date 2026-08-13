@@ -8,11 +8,14 @@ import env from "./config/env.js";
 import { notFoundHandler } from "./middleware/errorHandler.js";
 import errorHandler from "./middleware/errorHandler.js";
 import { apiRateLimit } from "./middleware/rateLimit.js";
+import requireAuth from "./middleware/auth.js";
+import requireAdmin from "./middleware/admin.js";
 import administrativeDivisionRouter from "./modules/administrative-divisions/administrative-division.routes.js";
 import adminRouter from "./modules/admin/admin.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import favoriteRouter from "./modules/favorites/favorite.routes.js";
 import mapRouter from "./modules/maps/map.routes.js";
+import kycRouter from "./modules/kyc/kyc.routes.js";
 import paymentRouter from "./modules/payments/payment.routes.js";
 import propertyRouter from "./modules/properties/property.routes.js";
 import reportRouter from "./modules/reports/report.routes.js";
@@ -154,8 +157,24 @@ app.use(
   }),
 );
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({
+  verify(req, res, buffer) {
+    if (req.originalUrl?.startsWith("/api/payments/webhook/")) {
+      req.rawBody = buffer.toString("utf8");
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
+app.use(
+  "/api/uploads/werent/kyc",
+  requireAuth,
+  requireAdmin,
+  express.static(path.join(process.cwd(), "uploads", "werent", "kyc"), {
+    setHeaders(res) {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    },
+  }),
+);
 app.use(
   "/api/uploads",
   express.static(path.join(process.cwd(), "uploads"), {
@@ -172,6 +191,7 @@ app.use("/api/administrative-divisions", administrativeDivisionRouter);
 app.use("/api/properties", propertyRouter);
 app.use("/api/favorites", favoriteRouter);
 app.use("/api/maps", mapRouter);
+app.use("/api/kyc", kycRouter);
 app.use("/api/reports", reportRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/admin", adminRouter);

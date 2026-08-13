@@ -15,6 +15,7 @@ const { default: Property } =
 const { default: WalletTransaction } = await import(
   "../src/modules/payments/wallet-transaction.model.js"
 );
+const { default: User } = await import("../src/modules/users/user.model.js");
 
 let mongoServer;
 const tinyPngBuffer = Buffer.from(
@@ -23,11 +24,16 @@ const tinyPngBuffer = Buffer.from(
 );
 
 async function registerUser(email = "owner@example.com") {
-  return request(app).post("/api/auth/register").send({
+  const response = await request(app).post("/api/auth/register").send({
     fullName: "Property Owner",
     email,
     password: "Password123!",
   });
+  await User.findByIdAndUpdate(response.body.data.user.id, {
+    kycStatus: "verified",
+    canPostListing: true,
+  });
+  return response;
 }
 
 describe("property publishing workflow", () => {

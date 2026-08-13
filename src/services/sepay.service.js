@@ -26,7 +26,12 @@ export function verifySepaySignature(payload, signature = "") {
     .update(rawPayload)
     .digest("hex");
 
-  return digest === signature;
+  const digestBuffer = Buffer.from(digest, "utf8");
+  const signatureBuffer = Buffer.from(String(signature), "utf8");
+  return (
+    digestBuffer.length === signatureBuffer.length &&
+    crypto.timingSafeEqual(digestBuffer, signatureBuffer)
+  );
 }
 
 export function verifySepayIpnSecret(secret = "") {

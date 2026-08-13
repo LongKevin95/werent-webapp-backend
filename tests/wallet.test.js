@@ -47,11 +47,21 @@ describe("wallet top-up and spending", () => {
       packageCode: "wallet_top_up",
       packageName: "Nạp tiền ví WeRent",
       amount: 10000,
+      baseAmount: 10000,
+      bonusAmount: 1000,
+      totalCredit: 11000,
+      transactionType: "topup",
       orderCode: "WRTP-TEST-10000",
       orderType: "wallet_top_up",
       status: ORDER_STATUS.PAID,
       paidAt: new Date(),
     });
+
+    const { default: User } = await import("../src/modules/users/user.model.js");
+    await User.updateOne(
+      { _id: userId },
+      { $set: { kycStatus: "verified", canPostListing: true, verifiedAt: new Date() } },
+    );
 
     const walletResponse = await request(app)
       .get("/api/payments/wallet")

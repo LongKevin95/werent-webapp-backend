@@ -6,6 +6,7 @@ const WALLET_TRANSACTION_TYPES = [
   "spend",
   "promotion_expired",
   "refund",
+  "admin_adjustment",
 ];
 const WALLET_TRANSACTION_DIRECTIONS = ["credit", "debit"];
 

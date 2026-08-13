@@ -69,6 +69,12 @@ export async function updateProfile(userId, payload) {
     }
   }
 
+  const identityChanged =
+    user.kycStatus === "verified" &&
+    ((payload.fullName !== undefined && payload.fullName.trim() !== user.fullName) ||
+      (payload.email !== undefined && nextEmail !== user.email) ||
+      (payload.phone !== undefined && nextPhone !== user.phone));
+
   if (payload.fullName !== undefined) {
     user.fullName = payload.fullName.trim();
   }
@@ -79,6 +85,13 @@ export async function updateProfile(userId, payload) {
 
   if (payload.phone !== undefined) {
     user.phone = nextPhone;
+  }
+
+  if (identityChanged) {
+    user.kycStatus = "unverified";
+    user.canPostListing = false;
+    user.verifiedAt = null;
+    user.verifiedBy = null;
   }
 
   await user.save();

@@ -1,0 +1,151 @@
+import mongoose from "mongoose";
+import ApiError from "../../common/ApiError.js";
+import { ORDER_STATUS } from "../../common/constants.js";
+import User from "../users/user.model.js";
+import PaymentOrder from "./payment.model.js";
+import TopupPromotion from "./promotion.model.js";
+import { adjustWalletBalance, reconcileWalletTopUps } from "./wallet.service.js";
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function assertId(id, message) {
+  if (!mongoose.isValidObjectId(id)) throw new ApiError(404, message);
+}
+
+export async function listAdminTransactions(query = {}) {
+  const page = query.page ?? 1;
+  const limit = query.limit ?? 10;
+  const filter = {};
+  const topupScopeTypes = [
+    "topup",
+    "promotion_bonus",
+    "admin_adjustment",
+    "refund",
+  ];
+  if (query.status) filter.status = query.status;
+  if (query.transactionType) {
+    filter.transactionType = query.transactionType;
+  } else if (query.scope === "topup") {
+    filter.transactionType = { $in: topupScopeTypes };
+  }
+  if (query.provider) filter.provider = query.provider;
+  if (query.dateFrom || query.dateTo) {
+    filter.createdAt = {};
+    if (query.dateFrom) filter.createdAt.$gte = query.dateFrom;
+    if (query.dateTo) filter.createdAt.$lte = query.dateTo;
+  }
+  if (query.search) {
+    const pattern = new RegExp(escapeRegExp(query.search), "i");
+    const users = await User.find({ $or: [{ fullName: pattern }, { email: pattern }, { phone: pattern }] }).select("_id");
+    filter.$or = [
+      { orderCode: pattern },
+      { providerTransactionId: pattern },
+      { user: { $in: users.map((user) => user._id) } },
+    ];
+  }
+  const summaryFilter = query.transactionType
+    ? { transactionType: query.transactionType }
+    : query.scope === "topup"
+      ? { transactionType: { $in: topupScopeTypes } }
+      : {};
+
+  const [items, total, statusCounts, totalValue] = await Promise.all([
+    PaymentOrder.find(filter).populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
+      .populate("adminActor", "fullName email").populate("promotion", "name code bonusPercent")
+      .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    PaymentOrder.countDocuments(filter),
+    PaymentOrder.aggregate([
+      { $match: summaryFilter },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
+    ]),
+    PaymentOrder.aggregate([
+      {
+        $match: {
+          ...summaryFilter,
+          status: ORDER_STATUS.PAID,
+          transactionType: "topup",
+        },
+      },
+      { $group: { _id: null, value: { $sum: "$baseAmount" } } },
+    ]),
+  ]);
+  const counts = Object.fromEntries(statusCounts.map((entry) => [entry._id, entry.count]));
+  return {
+    items,
+    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
+    summary: {
+      total: Object.values(counts).reduce((sum, count) => sum + count, 0),
+      paid: counts.paid ?? 0,
+      pending: counts.pending ?? 0,
+      failed: counts.failed ?? 0,
+      canceled: counts.canceled ?? 0,
+      totalValue: totalValue[0]?.value ?? 0,
+    },
+  };
+}
+
+export async function getAdminTransaction(id) {
+  assertId(id, "Không tìm thấy giao dịch.");
+  const item = await PaymentOrder.findById(id).populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
+    .populate("adminActor", "fullName email").populate("promotion", "name code bonusPercent");
+  if (!item) throw new ApiError(404, "Không tìm thấy giao dịch.");
+  return item;
+}
+
+export async function adjustBalance(adminId, payload) {
+  assertId(payload.userId, "Không tìm thấy người dùng.");
+  const delta = payload.direction === "credit" ? payload.amount : -payload.amount;
+  const user = await User.findById(payload.userId);
+  if (!user) throw new ApiError(404, "Không tìm thấy người dùng.");
+  const adjustment = await adjustWalletBalance(user._id, payload.direction, payload.amount, {
+    adminId: String(adminId),
+    reason: payload.reason,
+  });
+  try {
+    return await PaymentOrder.create({
+      user: user._id,
+      packageCode: "ADMIN_ADJUSTMENT",
+      packageName: payload.direction === "credit" ? "Điều chỉnh tăng số dư" : "Điều chỉnh giảm số dư",
+      amount: payload.amount,
+      baseAmount: payload.amount,
+      bonusAmount: 0,
+      totalCredit: delta,
+      balanceBefore: adjustment.balanceBefore,
+      balanceAfter: adjustment.balanceAfter,
+      orderCode: `ADJ-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+      transactionType: "admin_adjustment",
+      orderType: "admin_adjustment",
+      provider: "system",
+      status: ORDER_STATUS.PAID,
+      adminActor: adminId,
+      adjustmentReason: payload.reason,
+      confirmedAt: new Date(),
+      creditedAt: new Date(),
+    });
+  } catch (error) {
+    await adjustment.transaction.deleteOne().catch(() => null);
+    await reconcileWalletTopUps(user._id).catch(() => null);
+    throw error;
+  }
+}
+
+export function listPromotions() {
+  return TopupPromotion.find().populate("createdBy", "fullName email").sort({ createdAt: -1 });
+}
+
+export function createPromotion(adminId, payload) {
+  return TopupPromotion.create({ ...payload, code: payload.code.toUpperCase(), createdBy: adminId });
+}
+
+export async function updatePromotion(id, payload) {
+  assertId(id, "Không tìm thấy chương trình khuyến mãi.");
+  const item = await TopupPromotion.findById(id);
+  if (!item) throw new ApiError(404, "Không tìm thấy chương trình khuyến mãi.");
+  Object.assign(item, payload);
+  if (payload.code) item.code = payload.code.toUpperCase();
+  if (item.endsAt <= item.startsAt) throw new ApiError(400, "Thời gian kết thúc phải sau thời gian bắt đầu.");
+  await item.save();
+  return item;
+}

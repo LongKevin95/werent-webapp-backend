@@ -1,6 +1,11 @@
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
-import { ROLE_LIST, ROLES } from "../../common/constants.js";
+import {
+  KYC_STATUS,
+  KYC_STATUS_LIST,
+  ROLE_LIST,
+  ROLES,
+} from "../../common/constants.js";
 import { normalizeVietnamPhone } from "../../common/phone.js";
 
 function normalizeEmail(email) {
@@ -75,6 +80,23 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+    dateOfBirth: { type: Date, default: null },
+    address: { type: String, default: "", trim: true },
+    identityNumber: { type: String, default: "", trim: true },
+    identityIssuedAt: { type: Date, default: null },
+    kycStatus: {
+      type: String,
+      enum: KYC_STATUS_LIST,
+      default: KYC_STATUS.UNVERIFIED,
+      index: true,
+    },
+    canPostListing: { type: Boolean, default: false },
+    verifiedAt: { type: Date, default: null },
+    verifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
     },
   },
   {

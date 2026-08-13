@@ -10,6 +10,7 @@ import {
   spendWalletForListing,
 } from "../payments/wallet.service.js";
 import Property from "./property.model.js";
+import User from "../users/user.model.js";
 
 function serializePropertyImage(image) {
   return {
@@ -228,6 +229,14 @@ export async function getPropertyById(propertyId) {
 }
 
 export async function createProperty(ownerId, payload, files = []) {
+  const owner = await User.findById(ownerId);
+  const isAdmin = owner?.roles?.includes(ROLES.ADMIN);
+  if (!owner || (!isAdmin && (!owner.canPostListing || owner.kycStatus !== "verified"))) {
+    throw new ApiError(
+      403,
+      "Tài khoản cần được KYC xác thực trước khi có thể đăng tin.",
+    );
+  }
   const requestedStatus =
     payload.status === PROPERTY_STATUS.DRAFT
       ? PROPERTY_STATUS.DRAFT
@@ -293,6 +302,10 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
 
   if (!isOwner && !isAdmin) {
     throw new ApiError(403, "Bạn không thể chỉnh sửa tin đăng này.");
+  }
+
+  if (!isAdmin && (!actor.canPostListing || actor.kycStatus !== "verified")) {
+    throw new ApiError(403, "Tài khoản cần được KYC xác thực trước khi sửa tin đăng.");
   }
 
   const payloadKeys = Object.keys(payload).filter(

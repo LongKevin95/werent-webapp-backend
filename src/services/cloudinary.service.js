@@ -44,6 +44,7 @@ function getUploadExtension(file) {
       "image/jpeg": ".jpg",
       "image/png": ".png",
       "image/webp": ".webp",
+      "application/pdf": ".pdf",
     }[file.mimetype] ?? ".jpg"
   );
 }
