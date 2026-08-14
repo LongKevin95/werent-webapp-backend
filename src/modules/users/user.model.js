@@ -85,6 +85,8 @@ const userSchema = new mongoose.Schema(
     address: { type: String, default: "", trim: true },
     identityNumber: { type: String, default: "", trim: true },
     identityIssuedAt: { type: Date, default: null },
+    passportNumber: { type: String, default: "", trim: true },
+    taxCode: { type: String, default: "", trim: true },
     kycStatus: {
       type: String,
       enum: KYC_STATUS_LIST,

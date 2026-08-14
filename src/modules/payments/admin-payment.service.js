@@ -6,12 +6,107 @@ import PaymentOrder from "./payment.model.js";
 import TopupPromotion from "./promotion.model.js";
 import { adjustWalletBalance, reconcileWalletTopUps } from "./wallet.service.js";
 
+const DEMO_TOP_UP_PROVIDER = "admin_demo";
+const DEMO_TOP_UP_PACKAGE_CODE = "ADMIN_DEMO_TOPUP";
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function assertId(id, message) {
   if (!mongoose.isValidObjectId(id)) throw new ApiError(404, message);
+}
+
+async function reconcilePaidTopUpOrders(items) {
+  const userIds = [
+    ...new Set(
+      items
+        .filter(
+          (item) =>
+            item.status === ORDER_STATUS.PAID &&
+            item.orderType === "wallet_top_up" &&
+            item.user,
+        )
+        .map((item) => String(item.user._id ?? item.user)),
+    ),
+  ];
+
+  if (!userIds.length) return;
+  await Promise.all(userIds.map((userId) => reconcileWalletTopUps(userId)));
+}
+
+function populateAdminTransactionQuery(query) {
+  return query
+    .populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
+    .populate("adminActor", "fullName email")
+    .populate("promotion", "name code bonusPercent");
+}
+
+async function findApplicableTopupPromotion(userId, amount) {
+  const now = new Date();
+  const promotions = await TopupPromotion.find({
+    isActive: true,
+    startsAt: { $lte: now },
+    endsAt: { $gte: now },
+    minimumAmount: { $lte: amount },
+  }).sort({ bonusPercent: -1, createdAt: 1 });
+
+  for (const promotion of promotions) {
+    const usageCount = await PaymentOrder.countDocuments({
+      user: userId,
+      promotion: promotion._id,
+      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.PAID] },
+      transactionType: "topup",
+    });
+    if (usageCount < promotion.perUserLimit) return promotion;
+  }
+
+  return null;
+}
+
+function calculatePromotionBonus(amount, promotion) {
+  if (!promotion) return 0;
+  const calculated = Math.floor((amount * promotion.bonusPercent) / 100);
+  return promotion.maximumBonus == null ? calculated : Math.min(calculated, promotion.maximumBonus);
+}
+
+async function findDemoTopUpUser(payload) {
+  const email = payload.email?.trim().toLowerCase();
+  if (!email) {
+    assertId(payload.userId, "Không tìm thấy người dùng.");
+  }
+
+  const user = email
+    ? await User.findOne({ email })
+    : await User.findById(payload.userId);
+  if (!user) throw new ApiError(404, "Không tìm thấy tài khoản với email đã nhập.");
+
+  return user;
+}
+
+function serializeDemoTopUpQuote(user, amount, promotion) {
+  const bonusAmount = calculatePromotionBonus(amount, promotion);
+  return {
+    user: {
+      id: user._id.toString(),
+      fullName: user.fullName,
+      email: user.email,
+      walletBalance: user.walletBalance ?? 0,
+      walletPromotionBalance: user.walletPromotionBalance ?? 0,
+    },
+    amount,
+    bonusAmount,
+    totalCredit: amount + bonusAmount,
+    promotion: promotion
+      ? {
+          id: promotion._id.toString(),
+          name: promotion.name,
+          code: promotion.code,
+          bonusPercent: promotion.bonusPercent,
+          maximumBonus: promotion.maximumBonus,
+        }
+      : null,
+  };
 }
 
 export async function listAdminTransactions(query = {}) {
@@ -51,9 +146,8 @@ export async function listAdminTransactions(query = {}) {
       ? { transactionType: { $in: topupScopeTypes } }
       : {};
 
-  const [items, total, statusCounts, totalValue] = await Promise.all([
-    PaymentOrder.find(filter).populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
-      .populate("adminActor", "fullName email").populate("promotion", "name code bonusPercent")
+  let [items, total, statusCounts, totalValue] = await Promise.all([
+    populateAdminTransactionQuery(PaymentOrder.find(filter))
       .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
     PaymentOrder.countDocuments(filter),
     PaymentOrder.aggregate([
@@ -71,6 +165,11 @@ export async function listAdminTransactions(query = {}) {
       { $group: { _id: null, value: { $sum: "$baseAmount" } } },
     ]),
   ]);
+  await reconcilePaidTopUpOrders(items);
+  if (items.length) {
+    items = await populateAdminTransactionQuery(PaymentOrder.find({ _id: { $in: items.map((item) => item._id) } }))
+      .sort({ createdAt: -1 });
+  }
   const counts = Object.fromEntries(statusCounts.map((entry) => [entry._id, entry.count]));
   return {
     items,
@@ -88,9 +187,10 @@ export async function listAdminTransactions(query = {}) {
 
 export async function getAdminTransaction(id) {
   assertId(id, "Không tìm thấy giao dịch.");
-  const item = await PaymentOrder.findById(id).populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
-    .populate("adminActor", "fullName email").populate("promotion", "name code bonusPercent");
+  let item = await populateAdminTransactionQuery(PaymentOrder.findById(id));
   if (!item) throw new ApiError(404, "Không tìm thấy giao dịch.");
+  await reconcilePaidTopUpOrders([item]);
+  item = await populateAdminTransactionQuery(PaymentOrder.findById(id));
   return item;
 }
 
@@ -129,6 +229,66 @@ export async function adjustBalance(adminId, payload) {
     await reconcileWalletTopUps(user._id).catch(() => null);
     throw error;
   }
+}
+
+export async function createDemoTopUp(adminId, payload) {
+  const user = await findDemoTopUpUser(payload);
+  const amount = Number(payload.amount);
+  const promotion = await findApplicableTopupPromotion(user._id, amount);
+  const bonusAmount = calculatePromotionBonus(amount, promotion);
+  const paidAt = new Date();
+  const currentTotals = await reconcileWalletTopUps(user._id);
+  const balanceBefore =
+    Number(currentTotals.walletBalance ?? 0) +
+    Number(currentTotals.walletPromotionBalance ?? 0);
+  const totalCredit = amount + bonusAmount;
+
+  const order = await PaymentOrder.create({
+    user: user._id,
+    packageCode: DEMO_TOP_UP_PACKAGE_CODE,
+    packageName: "Admin nạp tiền demo",
+    transactionType: "topup",
+    orderType: "wallet_top_up",
+    amount,
+    baseAmount: amount,
+    bonusAmount,
+    totalCredit,
+    promotion: promotion?._id ?? null,
+    promotionName: promotion?.name ?? null,
+    balanceBefore,
+    balanceAfter: balanceBefore + totalCredit,
+    orderCode: `DEMO-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+    provider: DEMO_TOP_UP_PROVIDER,
+    paymentMethod: "ADMIN_DEMO",
+    status: ORDER_STATUS.PAID,
+    paidAt,
+    confirmedAt: paidAt,
+    creditedAt: paidAt,
+    adminActor: adminId,
+    adjustmentReason: payload.note || "Admin nạp tiền demo",
+    note: payload.note || "",
+    rawWebhookPayload: {
+      source: DEMO_TOP_UP_PROVIDER,
+      adminActor: String(adminId),
+    },
+  });
+
+  const totals = await reconcileWalletTopUps(user._id);
+  const balanceAfter =
+    Number(totals.walletBalance ?? 0) +
+    Number(totals.walletPromotionBalance ?? 0);
+  order.balanceAfter = balanceAfter;
+  order.balanceBefore = Math.max(balanceAfter - totalCredit, 0);
+  await order.save();
+
+  return order.populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance");
+}
+
+export async function getDemoTopUpQuote(payload) {
+  const user = await findDemoTopUpUser(payload);
+  const amount = Number(payload.amount);
+  const promotion = await findApplicableTopupPromotion(user._id, amount);
+  return serializeDemoTopUpQuote(user, amount, promotion);
 }
 
 export function listPromotions() {

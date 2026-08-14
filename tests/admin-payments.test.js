@@ -11,6 +11,8 @@ process.env.SEPAY_WEBHOOK_SECRET = "";
 const { default: app } = await import("../src/app.js");
 const { signAccessToken } = await import("../src/modules/auth/auth.service.js");
 const { default: User } = await import("../src/modules/users/user.model.js");
+const { default: PaymentOrder } = await import("../src/modules/payments/payment.model.js");
+const { default: WalletTransaction } = await import("../src/modules/payments/wallet-transaction.model.js");
 
 let mongoServer;
 let adminToken;
@@ -97,5 +99,63 @@ describe("admin top-up management", () => {
       .set("Authorization", `Bearer ${adminToken}`)
       .send({ userId: user.id, direction: "debit", amount: 300000, reason: "Thu hồi tiền ghi nhận sai." });
     expect(invalidDebit.status).toBe(400);
+  });
+
+  it("creates a demo top-up, separates real and promotion balances, and records wallet history", async () => {
+    const now = Date.now();
+    await request(app).post("/api/admin/payments/promotions")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Demo bonus 10%", code: "DEMO10", bonusPercent: 10, minimumAmount: 10000, maximumBonus: 50000, startsAt: new Date(now - 60000), endsAt: new Date(now + 60000), perUserLimit: 1 });
+
+    const quote = await request(app).get("/api/admin/payments/demo-topups/quote")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .query({ email: user.email, amount: 500000 });
+
+    expect(quote.status).toBe(200);
+    expect(quote.body.data.quote).toMatchObject({
+      amount: 500000,
+      bonusAmount: 50000,
+      totalCredit: 550000,
+      promotion: { name: "Demo bonus 10%", code: "DEMO10", bonusPercent: 10 },
+    });
+
+    const response = await request(app).post("/api/admin/payments/demo-topups")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ email: user.email, amount: 500000, note: "Demo nạp tiền Sepay." });
+
+    expect(response.status).toBe(201);
+    expect(response.body.data.item).toMatchObject({
+      transactionType: "topup",
+      orderType: "wallet_top_up",
+      packageCode: "ADMIN_DEMO_TOPUP",
+      packageName: "Admin nạp tiền demo",
+      provider: "admin_demo",
+      amount: 500000,
+      bonusAmount: 50000,
+      totalCredit: 550000,
+      balanceBefore: 0,
+      balanceAfter: 550000,
+      adjustmentReason: "Demo nạp tiền Sepay.",
+    });
+
+    const refreshedUser = await User.findById(user._id);
+    expect(refreshedUser.walletBalance).toBe(500000);
+    expect(refreshedUser.walletPromotionBalance).toBe(50000);
+
+    const order = await PaymentOrder.findById(response.body.data.item._id);
+    const history = await WalletTransaction.find({ paymentOrder: order._id }).sort({ type: 1 });
+    expect(history).toHaveLength(2);
+    expect(history.map((item) => item.description)).toEqual([
+      "Khuyến mãi nạp tiền demo",
+      "Admin nạp tiền demo",
+    ]);
+  });
+
+  it("rejects demo top-up when the target email does not exist", async () => {
+    const response = await request(app).post("/api/admin/payments/demo-topups")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ email: "missing@example.com", amount: 100000, bonusAmount: 0 });
+
+    expect(response.status).toBe(404);
   });
 });

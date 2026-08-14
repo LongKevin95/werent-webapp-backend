@@ -13,6 +13,14 @@ export const createBalanceAdjustment = asyncHandler(async (req, res) => {
   const item = await service.adjustBalance(req.user._id, req.body);
   res.status(201).json({ success: true, message: "Điều chỉnh số dư thành công và đã ghi nhật ký.", data: { item } });
 });
+export const createDemoTopUp = asyncHandler(async (req, res) => {
+  const item = await service.createDemoTopUp(req.user._id, req.body);
+  res.status(201).json({ success: true, message: "Nạp tiền demo thành công và đã cập nhật số dư ví.", data: { item } });
+});
+export const getDemoTopUpQuote = asyncHandler(async (req, res) => {
+  const quote = await service.getDemoTopUpQuote(req.query);
+  res.json({ success: true, message: "Lấy thông tin khuyến mãi nạp tiền demo thành công.", data: { quote } });
+});
 export const getPromotions = asyncHandler(async (req, res) => {
   const items = await service.listPromotions();
   res.json({ success: true, message: "Lấy danh sách khuyến mãi thành công.", data: { items } });

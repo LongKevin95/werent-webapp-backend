@@ -214,8 +214,8 @@ export async function createUser(payload) {
   const email = User.normalizeEmail(payload.email);
   const phone = User.normalizePhone(payload.phone);
 
-  if (!email && !phone) {
-    throw new ApiError(400, "Cần cung cấp email hoặc số điện thoại.");
+  if (!email || !phone) {
+    throw new ApiError(400, "Cần cung cấp đầy đủ email và số điện thoại.");
   }
 
   await ensureUniqueContact({ email, phone });

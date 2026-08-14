@@ -26,6 +26,8 @@ import {
 } from "../kyc/kyc.schema.js";
 import {
   createBalanceAdjustment,
+  createDemoTopUp,
+  getDemoTopUpQuote,
   getAdminTransactionDetail,
   getAdminTransactions,
   getPromotions,
@@ -36,6 +38,8 @@ import {
   adminPaymentQuerySchema,
   balanceAdjustmentSchema,
   createPromotionSchema,
+  demoTopUpQuoteSchema,
+  demoTopUpSchema,
   updatePromotionSchema,
 } from "../payments/admin-payment.schema.js";
 import {
@@ -84,6 +88,16 @@ router.post(
   "/payments/adjustments",
   validate(balanceAdjustmentSchema),
   createBalanceAdjustment,
+);
+router.get(
+  "/payments/demo-topups/quote",
+  validate(demoTopUpQuoteSchema, "query"),
+  getDemoTopUpQuote,
+);
+router.post(
+  "/payments/demo-topups",
+  validate(demoTopUpSchema),
+  createDemoTopUp,
 );
 router.get("/payments/promotions", getPromotions);
 router.post("/payments/promotions", validate(createPromotionSchema), postPromotion);

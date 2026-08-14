@@ -24,9 +24,16 @@ const tinyPngBuffer = Buffer.from(
 );
 
 async function registerUser(email = "owner@example.com") {
+  const phone = email
+    .split("")
+    .reduce((total, character) => total + character.charCodeAt(0), 0)
+    .toString()
+    .padStart(7, "0")
+    .slice(-7);
   const response = await request(app).post("/api/auth/register").send({
     fullName: "Property Owner",
     email,
+    phone: `090${phone}`,
     password: "Password123!",
   });
   await User.findByIdAndUpdate(response.body.data.user.id, {

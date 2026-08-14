@@ -60,13 +60,18 @@ describe("KYC account and listing verification", () => {
       .send({ title: "Căn hộ chưa KYC", propertyType: "Căn hộ", address: "Quận 1", price: 9000000 });
     expect(blocked.status).toBe(403);
 
+    const updateProfile = await request(app)
+      .patch("/api/users/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ address: "123 Nguyễn Huệ, Quận 1" });
+    expect(updateProfile.status).toBe(200);
+
     const submit = await request(app).post("/api/kyc/account")
       .set("Authorization", `Bearer ${token}`)
       .field("fullName", "Nguyễn Chủ Nhà")
       .field("dateOfBirth", "1990-01-02")
       .field("email", "owner-kyc@example.com")
       .field("phone", "0901234567")
-      .field("address", "123 Nguyễn Huệ, Quận 1")
       .field("identityNumber", "079090001234")
       .field("identityIssuedAt", "2021-03-04")
       .attach("identityFront", Buffer.from("front"), { filename: "front.png", contentType: "image/png" })
@@ -83,7 +88,11 @@ describe("KYC account and listing verification", () => {
 
     const profile = await request(app).get("/api/users/me")
       .set("Authorization", `Bearer ${token}`);
-    expect(profile.body.data.user).toMatchObject({ kycStatus: "verified", canPostListing: true });
+    expect(profile.body.data.user).toMatchObject({
+      kycStatus: "verified",
+      canPostListing: true,
+      address: "123 Nguyễn Huệ, Quận 1",
+    });
 
     const create = await request(app).post("/api/properties")
       .set("Authorization", `Bearer ${token}`)

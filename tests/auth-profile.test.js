@@ -21,6 +21,7 @@ async function registerUser(overrides = {}) {
   const payload = {
     fullName: "Nguyễn Văn Test",
     email: "test@example.com",
+    phone: "0901234567",
     password: "Password123!",
     ...overrides,
   };
@@ -54,13 +55,13 @@ describe("authentication and profile backlog", () => {
     await mongoServer?.stop();
   });
 
-  it("registers with a Vietnamese mobile number and logs in using normalized variants", async () => {
+  it("registers with email and Vietnamese mobile number then logs in using normalized variants", async () => {
     const registerResponse = await registerUser({
-      email: undefined,
       phone: "0901234567",
     });
 
     expect(registerResponse.status).toBe(201);
+    expect(registerResponse.body.data.user.email).toBe("test@example.com");
     expect(registerResponse.body.data.user.phone).toBe("0901234567");
     expect(registerResponse.body.data.user.roles).toEqual(["user"]);
     expect(registerResponse.body.data.accessToken).toEqual(expect.any(String));
@@ -72,6 +73,14 @@ describe("authentication and profile backlog", () => {
 
     expect(loginResponse.status).toBe(200);
     expect(loginResponse.body.data.user.phone).toBe("0901234567");
+  });
+
+  it("requires both email and phone during registration", async () => {
+    const missingEmailResponse = await registerUser({ email: undefined });
+    expect(missingEmailResponse.status).toBe(400);
+
+    const missingPhoneResponse = await registerUser({ phone: undefined });
+    expect(missingPhoneResponse.status).toBe(400);
   });
 
   it("protects the current-user endpoint with JWT", async () => {
@@ -108,15 +117,42 @@ describe("authentication and profile backlog", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         fullName: "Nguyễn Văn Mới",
-        phone: "901111111",
+        dateOfBirth: "1991-05-12",
+        address: "12 Lê Lợi, Quận 1",
+        identityNumber: "079091001234",
+        passportNumber: "P7654321",
+        taxCode: "0311111111",
       });
 
     expect(response.status).toBe(200);
     expect(response.body.data.user).toMatchObject({
       fullName: "Nguyễn Văn Mới",
       email: "test@example.com",
-      phone: "0901111111",
+      address: "12 Lê Lợi, Quận 1",
+      identityNumber: "079091001234",
+      passportNumber: "P7654321",
+      taxCode: "0311111111",
     });
+    expect(response.body.data.user.dateOfBirth).toEqual(expect.any(String));
+  });
+
+  it("prevents users from changing email or phone through profile updates", async () => {
+    const registerResponse = await registerUser({
+      phone: "0901234567",
+    });
+    const token = registerResponse.body.data.accessToken;
+
+    const emailResponse = await request(app)
+      .patch("/api/users/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ email: "new-email@example.com" });
+    expect(emailResponse.status).toBe(403);
+
+    const phoneResponse = await request(app)
+      .patch("/api/users/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ phone: "0901111111" });
+    expect(phoneResponse.status).toBe(403);
   });
 
   it("changes the password and accepts only the new password afterward", async () => {

@@ -19,6 +19,21 @@ export const balanceAdjustmentSchema = z.object({
   reason: z.string().trim().min(5).max(1000),
 });
 
+export const demoTopUpSchema = z.object({
+  userId: z.string().trim().optional(),
+  email: z.string().trim().email("Email tài khoản không hợp lệ.").optional(),
+  amount: z.coerce.number().int().min(10_000, "Số tiền nạp tối thiểu là 10.000 đ."),
+  note: z.string().trim().max(500).optional(),
+}).refine((value) => value.userId || value.email, {
+  path: ["email"],
+  message: "Vui lòng nhập email tài khoản cần nạp tiền demo.",
+});
+
+export const demoTopUpQuoteSchema = z.object({
+  email: z.string().trim().email("Email tài khoản không hợp lệ."),
+  amount: z.coerce.number().int().min(10_000, "Số tiền nạp tối thiểu là 10.000 đ."),
+});
+
 const promotionFields = {
   name: z.string().trim().min(2).max(150),
   code: z.string().trim().min(2).max(50),

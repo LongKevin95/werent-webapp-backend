@@ -18,6 +18,7 @@ async function registerUser() {
   return request(app).post("/api/auth/register").send({
     fullName: "Wallet Owner",
     email: "wallet-owner@example.com",
+    phone: "0901234567",
     password: "Password123!",
   });
 }

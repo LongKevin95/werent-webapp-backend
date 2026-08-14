@@ -47,22 +47,20 @@ export const loginSchema = z
 export const registerSchema = z
   .object({
     fullName: z.string().trim().min(1, "Họ và tên là bắt buộc"),
-    email: z.string().trim().email("Email không hợp lệ").optional(),
-    phone: z.union([z.string(), z.number()]).optional(),
+    email: z.string().trim().min(1, "Email là bắt buộc").email("Email không hợp lệ"),
+    phone: z.union([z.string(), z.number()]),
     password: z.string().min(8, "Mật khẩu phải có ít nhất 8 ký tự"),
   })
   .superRefine((data, context) => {
-    const hasEmail =
-      typeof data.email === "string" && data.email.trim().length > 0;
     const hasPhone =
       (typeof data.phone === "string" && data.phone.trim().length > 0) ||
       typeof data.phone === "number";
 
-    if (!hasEmail && !hasPhone) {
+    if (!hasPhone) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Cần cung cấp email hoặc số điện thoại.",
-        path: ["identifier"],
+        message: "Số điện thoại là bắt buộc.",
+        path: ["phone"],
       });
     }
 

@@ -12,9 +12,11 @@ export const submitAccountKycSchema = z.object({
   dateOfBirth: dateValue,
   email: z.string().trim().email(),
   phone: z.string().trim().min(9).max(20),
-  address: z.string().trim().min(5).max(500),
+  address: z.string().trim().min(5).max(500).optional(),
   identityNumber: z.string().trim().min(9).max(20),
   identityIssuedAt: dateValue,
+  passportNumber: z.string().trim().max(30).optional(),
+  taxCode: z.string().trim().max(30).optional(),
 }).superRefine((value, context) => {
   const now = new Date();
   if (value.dateOfBirth >= now) {

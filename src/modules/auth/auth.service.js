@@ -20,6 +20,8 @@ export function serializeUser(user) {
     address: user.address ?? "",
     identityNumber: user.identityNumber ?? "",
     identityIssuedAt: user.identityIssuedAt ?? null,
+    passportNumber: user.passportNumber ?? "",
+    taxCode: user.taxCode ?? "",
     kycStatus: user.kycStatus ?? "unverified",
     canPostListing: user.canPostListing === true,
     verifiedAt: user.verifiedAt ?? null,
@@ -74,6 +76,10 @@ export async function registerUser(payload) {
   const roles = resolvePublicRegisterRoles();
   const normalizedEmail = User.normalizeEmail(payload.email);
   const normalizedPhone = User.normalizePhone(payload.phone);
+
+  if (!normalizedEmail || !normalizedPhone) {
+    throw new ApiError(400, "Cần cung cấp đầy đủ email và số điện thoại.");
+  }
 
   const existingUser = await findExistingUser(payload);
 

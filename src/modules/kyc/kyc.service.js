@@ -67,11 +67,16 @@ export async function submitAccountKyc(userId, payload, files = {}) {
     throw new ApiError(415, "CCCD và selfie phải là tệp ảnh JPG, PNG hoặc WEBP.");
   }
 
-  const phone = normalizeVietnamPhone(payload.phone);
+  const email = user.email;
+  const phone = normalizeVietnamPhone(user.phone);
+  if (!email || !phone) {
+    throw new ApiError(400, "Tài khoản cần có đầy đủ email và số điện thoại trước khi KYC.");
+  }
   if (!phone) throw new ApiError(400, "Số điện thoại không hợp lệ.");
+  const address = (payload.address ?? user.address ?? "").trim();
   const duplicateContact = await User.findOne({
     _id: { $ne: userId },
-    $or: [{ email: payload.email.toLowerCase() }, { phone }],
+    $or: [{ email }, { phone }],
   });
   if (duplicateContact) {
     throw new ApiError(409, "Email hoặc số điện thoại đã được tài khoản khác sử dụng.");
@@ -90,7 +95,14 @@ export async function submitAccountKyc(userId, payload, files = {}) {
     `werent/kyc/accounts/${userId}`,
   );
   try {
-    const request = await KYCRequest.create({ ...payload, phone, user: userId, documents });
+    const request = await KYCRequest.create({
+      ...payload,
+      address,
+      email,
+      phone,
+      user: userId,
+      documents,
+    });
     user.kycStatus = KYC_STATUS.PENDING;
     user.canPostListing = false;
     await user.save();
@@ -192,10 +204,12 @@ export async function reviewAccountKyc(requestId, adminId, payload) {
       fullName: item.fullName,
       email: item.email,
       phone: item.phone,
-      address: item.address,
+      address: item.address || user.address,
       dateOfBirth: item.dateOfBirth,
       identityNumber: item.identityNumber,
       identityIssuedAt: item.identityIssuedAt,
+      passportNumber: item.passportNumber ?? "",
+      taxCode: item.taxCode ?? "",
       kycStatus: KYC_STATUS.VERIFIED,
       canPostListing: true,
       verifiedAt: new Date(),

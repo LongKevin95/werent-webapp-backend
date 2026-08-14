@@ -20,6 +20,10 @@ function getTopUpPromotionExpiresAt(order) {
   return addDays(order.paidAt ?? order.updatedAt ?? new Date(), TEST_TOP_UP_PROMOTION_DAYS);
 }
 
+function isAdminDemoTopUp(order) {
+  return order.provider === "admin_demo" || order.packageCode === "ADMIN_DEMO_TOPUP";
+}
+
 function serializeWalletTransaction(transaction) {
   return {
     id: transaction._id.toString(),
@@ -124,9 +128,15 @@ export async function reconcileWalletTopUps(userId) {
         direction: "credit",
         amount: order.amount,
         realAmount: order.amount,
-        description: "Nạp tiền vào ví WeRent",
+        description: isAdminDemoTopUp(order)
+          ? "Admin nạp tiền demo"
+          : "Nạp tiền vào ví WeRent",
         paymentOrder: order._id,
-        metadata: { orderCode: order.orderCode },
+        metadata: {
+          orderCode: order.orderCode,
+          provider: order.provider,
+          packageCode: order.packageCode,
+        },
       });
     }
 
@@ -144,11 +154,15 @@ export async function reconcileWalletTopUps(userId) {
         amount: promotionAmount,
         promotionAmount,
         promotionRemainingAmount: promotionAmount,
-        description: "Ưu đãi nạp tiền 10%",
+        description: isAdminDemoTopUp(order)
+          ? "Khuyến mãi nạp tiền demo"
+          : "Ưu đãi nạp tiền",
         paymentOrder: order._id,
         expiresAt: getTopUpPromotionExpiresAt(order),
         metadata: {
           orderCode: order.orderCode,
+          provider: order.provider,
+          packageCode: order.packageCode,
           promotionName: order.promotionName ?? null,
           promotionDays: TEST_TOP_UP_PROMOTION_DAYS,
         },
