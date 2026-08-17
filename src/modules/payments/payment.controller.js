@@ -9,6 +9,7 @@ import {
   handleSepayWebhook,
   listPackages,
 } from "./payment.service.js";
+import { listCurrentTopupPromotions } from "./topup-promotion.service.js";
 import { getWalletOverview } from "./wallet.service.js";
 
 export const getPackages = asyncHandler(async (req, res) => {
@@ -39,6 +40,11 @@ export const getMyPaymentHistory = asyncHandler(async (req, res) => {
 export const getMyWallet = asyncHandler(async (req, res) => {
   const data = await getWalletOverview(req.user._id);
   return res.status(200).json({ success: true, message: "Lấy thông tin ví thành công.", data });
+});
+
+export const getCurrentTopUpPromotions = asyncHandler(async (req, res) => {
+  const data = await listCurrentTopupPromotions(req.user._id);
+  return res.status(200).json({ success: true, message: "Lấy danh sách khuyến mãi nạp tiền thành công.", data });
 });
 
 export const getPaymentQr = asyncHandler(async (req, res) => {

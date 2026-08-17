@@ -40,9 +40,12 @@ const promotionFields = {
   bonusPercent: z.coerce.number().min(0).max(100),
   minimumAmount: z.coerce.number().min(0).default(0),
   maximumBonus: z.coerce.number().min(0).nullable().optional(),
+  priority: z.coerce.number().int().min(0).default(0),
   startsAt: z.coerce.date(),
   endsAt: z.coerce.date(),
   perUserLimit: z.coerce.number().int().min(1).default(1),
+  stackable: z.boolean().optional(),
+  autoApply: z.boolean().optional(),
   isActive: z.boolean().optional(),
 };
 

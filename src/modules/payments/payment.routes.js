@@ -6,6 +6,7 @@ import {
   createPaymentOrder,
   createTopUpCheckout,
   createTopupOrder,
+  getCurrentTopUpPromotions,
   getMyPaymentHistory,
   getMyWallet,
   getPackages,
@@ -24,6 +25,7 @@ const router = Router();
 
 router.get("/packages", getPackages);
 router.get("/wallet", requireAuth, getMyWallet);
+router.get("/top-up/promotions", requireAuth, getCurrentTopUpPromotions);
 router.get("/history", requireAuth, getMyPaymentHistory);
 router.post("/orders", requireAuth, validate(createPaymentOrderSchema), createPaymentOrder);
 router.post("/top-up/checkout", requireAuth, validate(createWalletTopUpCheckoutSchema), createTopUpCheckout);

@@ -15,6 +15,11 @@ const SEED_OWNER_ID = "6a68c5b8426e8fd9a31f28a0";
 const SEED_OWNER_EMAIL = "benchothue@gmail.com";
 const SEED_OWNER_PHONE = "444555666";
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const legacySeedTitles = [
+  "Nhà nguyên căn hẻm xe hơi Xô Viết Nghệ Tĩnh",
+  "Nhà phố Phú Mỹ Hưng khu yên tĩnh",
+  "Nhà mặt tiền gần Bến Thành Quận 1",
+];
 
 function buildImageUrls(seed) {
   return [1, 2, 3].map((index) => ({
@@ -131,8 +136,8 @@ const seedProperties = [
     createdOffsetDays: 2,
   }),
   buildProperty({
-    title: "Nhà nguyên căn hẻm xe hơi Xô Viết Nghệ Tĩnh",
-    propertyType: "Nhà nguyên căn",
+    title: "Nhà riêng hẻm xe hơi Xô Viết Nghệ Tĩnh",
+    propertyType: "Nhà riêng",
     price: 18000000,
     area: 96,
     bedrooms: 3,
@@ -199,8 +204,8 @@ const seedProperties = [
     createdOffsetDays: 6,
   }),
   buildProperty({
-    title: "Nhà phố Phú Mỹ Hưng khu yên tĩnh",
-    propertyType: "Nhà phố",
+    title: "Nhà mặt phố Phú Mỹ Hưng khu yên tĩnh",
+    propertyType: "Nhà mặt phố",
     price: 32000000,
     area: 120,
     bedrooms: 4,
@@ -338,8 +343,8 @@ const seedProperties = [
     createdOffsetDays: 14,
   }),
   buildProperty({
-    title: "Nhà mặt tiền gần Bến Thành Quận 1",
-    propertyType: "Nhà mặt tiền",
+    title: "Nhà mặt phố gần Bến Thành Quận 1",
+    propertyType: "Nhà mặt phố",
     price: 45000000,
     area: 100,
     bedrooms: 3,
@@ -445,7 +450,10 @@ async function seedSearchProperties() {
   await connectDatabase();
 
   const owner = await ensureSeedOwner();
-  const seedTitles = seedProperties.map((property) => property.title);
+  const seedTitles = [
+    ...seedProperties.map((property) => property.title),
+    ...legacySeedTitles,
+  ];
 
   await Property.deleteMany({
     title: { $in: seedTitles },

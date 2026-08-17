@@ -2,6 +2,7 @@ import ApiError from "../../common/ApiError.js";
 import { ORDER_STATUS } from "../../common/constants.js";
 import User from "../users/user.model.js";
 import PaymentOrder from "./payment.model.js";
+import { refreshTopupPromotionFields } from "./topup-promotion.service.js";
 import WalletTransaction from "./wallet-transaction.model.js";
 
 const TEST_TOP_UP_PROMOTION_DAYS = 30;
@@ -24,7 +25,7 @@ function isAdminDemoTopUp(order) {
   return order.provider === "admin_demo" || order.packageCode === "ADMIN_DEMO_TOPUP";
 }
 
-function serializeWalletTransaction(transaction) {
+function serializeWalletTransaction(transaction, snapshot = {}) {
   return {
     id: transaction._id.toString(),
     type: transaction.type,
@@ -33,8 +34,9 @@ function serializeWalletTransaction(transaction) {
     realAmount: transaction.realAmount,
     promotionAmount: transaction.promotionAmount,
     promotionRemainingAmount: transaction.promotionRemainingAmount,
-    balanceAfter: transaction.balanceAfter,
-    promotionBalanceAfter: transaction.promotionBalanceAfter,
+    balanceAfter: snapshot.balanceAfter ?? transaction.balanceAfter,
+    promotionBalanceAfter:
+      snapshot.promotionBalanceAfter ?? transaction.promotionBalanceAfter,
     description: transaction.description,
     paymentOrder: transaction.paymentOrder,
     property: transaction.property,
@@ -42,6 +44,68 @@ function serializeWalletTransaction(transaction) {
     createdAt: transaction.createdAt,
     metadata: transaction.metadata,
   };
+}
+
+function sortWalletTransactionsByTimeline(left, right) {
+  const dateDiff = new Date(left.createdAt) - new Date(right.createdAt);
+  if (dateDiff) return dateDiff;
+
+  const typeOrder = {
+    top_up: 1,
+    promotion_credit: 2,
+    refund: 3,
+    admin_adjustment: 4,
+    spend: 5,
+    promotion_expired: 6,
+  };
+  const typeDiff = (typeOrder[left.type] ?? 99) - (typeOrder[right.type] ?? 99);
+  if (typeDiff) return typeDiff;
+
+  return String(left._id).localeCompare(String(right._id));
+}
+
+function buildWalletTransactionSnapshots(transactions) {
+  const snapshots = new Map();
+  let walletBalance = 0;
+  let promotionBalance = 0;
+
+  for (const transaction of [...transactions].sort(sortWalletTransactionsByTimeline)) {
+    if (transaction.type === "top_up") {
+      walletBalance += transaction.realAmount ?? transaction.amount ?? 0;
+    }
+
+    if (transaction.type === "promotion_credit") {
+      promotionBalance +=
+        transaction.promotionAmount ?? transaction.amount ?? 0;
+    }
+
+    if (transaction.type === "spend") {
+      walletBalance -= transaction.realAmount ?? 0;
+      promotionBalance -= transaction.promotionAmount ?? 0;
+    }
+
+    if (transaction.type === "refund") {
+      walletBalance += transaction.realAmount ?? transaction.amount ?? 0;
+      promotionBalance += transaction.promotionAmount ?? 0;
+    }
+
+    if (transaction.type === "admin_adjustment") {
+      const adjustedAmount = transaction.realAmount ?? transaction.amount ?? 0;
+      walletBalance +=
+        transaction.direction === "credit" ? adjustedAmount : -adjustedAmount;
+    }
+
+    if (transaction.type === "promotion_expired") {
+      promotionBalance -= transaction.promotionAmount ?? transaction.amount ?? 0;
+    }
+
+    snapshots.set(transaction._id.toString(), {
+      balanceAfter: Math.max(walletBalance, 0),
+      promotionBalanceAfter: Math.max(promotionBalance, 0),
+    });
+  }
+
+  return snapshots;
 }
 
 async function getWalletTotals(userId) {
@@ -116,6 +180,7 @@ export async function reconcileWalletTopUps(userId) {
   }).sort({ paidAt: 1, createdAt: 1 });
 
   for (const order of paidTopUpOrders) {
+    let orderNeedsSave = false;
     const existingTopUp = await WalletTransaction.exists({
       paymentOrder: order._id,
       type: "top_up",
@@ -140,11 +205,17 @@ export async function reconcileWalletTopUps(userId) {
       });
     }
 
-    const promotionAmount = calculateTopUpPromotionAmount(order);
     const existingPromotion = await WalletTransaction.exists({
       paymentOrder: order._id,
       type: "promotion_credit",
     });
+
+    if (!existingPromotion && !(order.bonusAmount > 0 || order.promotion)) {
+      await refreshTopupPromotionFields(order);
+      orderNeedsSave = true;
+    }
+
+    const promotionAmount = calculateTopUpPromotionAmount(order);
 
     if (promotionAmount > 0 && !existingPromotion) {
       await WalletTransaction.create({
@@ -164,9 +235,22 @@ export async function reconcileWalletTopUps(userId) {
           provider: order.provider,
           packageCode: order.packageCode,
           promotionName: order.promotionName ?? null,
+          promotionCode: order.promotionCode ?? null,
+          promotionBonusPercent: order.promotionBonusPercent ?? null,
+          promotionMaximumBonus: order.promotionMaximumBonus ?? null,
+          promotionPriority: order.promotionPriority ?? null,
+          promotions: order.promotions ?? [],
           promotionDays: TEST_TOP_UP_PROMOTION_DAYS,
         },
       });
+      if (order.balanceBefore != null) {
+        order.balanceAfter = Number(order.balanceBefore) + (order.totalCredit || order.amount);
+      }
+      orderNeedsSave = true;
+    }
+
+    if (orderNeedsSave) {
+      await order.save();
     }
   }
 
@@ -178,9 +262,11 @@ export async function reconcileWalletTopUps(userId) {
 
 export async function getWalletOverview(userId) {
   const totals = await reconcileWalletTopUps(userId);
-  const transactions = await WalletTransaction.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .limit(20);
+  const allTransactions = await WalletTransaction.find({ user: userId });
+  const transactionSnapshots = buildWalletTransactionSnapshots(allTransactions);
+  const transactions = [...allTransactions]
+    .sort((left, right) => -sortWalletTransactionsByTimeline(left, right))
+    .slice(0, 20);
 
   return {
     summary: {
@@ -193,7 +279,12 @@ export async function getWalletOverview(userId) {
         expiresInDays: TEST_TOP_UP_PROMOTION_DAYS,
       },
     },
-    transactions: transactions.map(serializeWalletTransaction),
+    transactions: transactions.map((transaction) =>
+      serializeWalletTransaction(
+        transaction,
+        transactionSnapshots.get(transaction._id.toString()),
+      ),
+    ),
   };
 }
 

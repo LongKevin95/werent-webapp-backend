@@ -19,6 +19,7 @@ import kycRouter from "./modules/kyc/kyc.routes.js";
 import paymentRouter from "./modules/payments/payment.routes.js";
 import propertyRouter from "./modules/properties/property.routes.js";
 import reportRouter from "./modules/reports/report.routes.js";
+import searchSuggestionRouter from "./modules/search/search-suggestion.routes.js";
 import userRouter from "./modules/users/user.routes.js";
 
 const app = express();
@@ -189,6 +190,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/users", userRouter);
 app.use("/api/administrative-divisions", administrativeDivisionRouter);
 app.use("/api/properties", propertyRouter);
+app.use("/api/search", searchSuggestionRouter);
 app.use("/api/favorites", favoriteRouter);
 app.use("/api/maps", mapRouter);
 app.use("/api/kyc", kycRouter);

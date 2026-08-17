@@ -4,6 +4,11 @@ import { ORDER_STATUS } from "../../common/constants.js";
 import User from "../users/user.model.js";
 import PaymentOrder from "./payment.model.js";
 import TopupPromotion from "./promotion.model.js";
+import {
+  buildLockedTopupPromotionFields,
+  calculatePromotionBonus,
+  findApplicableTopupPromotion,
+} from "./topup-promotion.service.js";
 import { adjustWalletBalance, reconcileWalletTopUps } from "./wallet.service.js";
 
 const DEMO_TOP_UP_PROVIDER = "admin_demo";
@@ -40,34 +45,6 @@ function populateAdminTransactionQuery(query) {
     .populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
     .populate("adminActor", "fullName email")
     .populate("promotion", "name code bonusPercent");
-}
-
-async function findApplicableTopupPromotion(userId, amount) {
-  const now = new Date();
-  const promotions = await TopupPromotion.find({
-    isActive: true,
-    startsAt: { $lte: now },
-    endsAt: { $gte: now },
-    minimumAmount: { $lte: amount },
-  }).sort({ bonusPercent: -1, createdAt: 1 });
-
-  for (const promotion of promotions) {
-    const usageCount = await PaymentOrder.countDocuments({
-      user: userId,
-      promotion: promotion._id,
-      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.PAID] },
-      transactionType: "topup",
-    });
-    if (usageCount < promotion.perUserLimit) return promotion;
-  }
-
-  return null;
-}
-
-function calculatePromotionBonus(amount, promotion) {
-  if (!promotion) return 0;
-  const calculated = Math.floor((amount * promotion.bonusPercent) / 100);
-  return promotion.maximumBonus == null ? calculated : Math.min(calculated, promotion.maximumBonus);
 }
 
 async function findDemoTopUpUser(payload) {
@@ -234,9 +211,11 @@ export async function adjustBalance(adminId, payload) {
 export async function createDemoTopUp(adminId, payload) {
   const user = await findDemoTopUpUser(payload);
   const amount = Number(payload.amount);
-  const promotion = await findApplicableTopupPromotion(user._id, amount);
-  const bonusAmount = calculatePromotionBonus(amount, promotion);
   const paidAt = new Date();
+  const promotionFields = await buildLockedTopupPromotionFields(user._id, amount, {
+    referenceDate: paidAt,
+  });
+  const bonusAmount = promotionFields.bonusAmount;
   const currentTotals = await reconcileWalletTopUps(user._id);
   const balanceBefore =
     Number(currentTotals.walletBalance ?? 0) +
@@ -251,10 +230,7 @@ export async function createDemoTopUp(adminId, payload) {
     orderType: "wallet_top_up",
     amount,
     baseAmount: amount,
-    bonusAmount,
-    totalCredit,
-    promotion: promotion?._id ?? null,
-    promotionName: promotion?.name ?? null,
+    ...promotionFields,
     balanceBefore,
     balanceAfter: balanceBefore + totalCredit,
     orderCode: `DEMO-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
@@ -287,7 +263,9 @@ export async function createDemoTopUp(adminId, payload) {
 export async function getDemoTopUpQuote(payload) {
   const user = await findDemoTopUpUser(payload);
   const amount = Number(payload.amount);
-  const promotion = await findApplicableTopupPromotion(user._id, amount);
+  const promotion = await findApplicableTopupPromotion(user._id, amount, {
+    includePendingReservations: true,
+  });
   return serializeDemoTopUpQuote(user, amount, promotion);
 }
 
