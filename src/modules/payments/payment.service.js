@@ -9,7 +9,10 @@ import {
   verifySepaySignature,
 } from "../../services/sepay.service.js";
 import PaymentOrder from "./payment.model.js";
-import TopupPromotion from "./promotion.model.js";
+import {
+  buildLockedTopupPromotionFields,
+  refreshTopupPromotionFields,
+} from "./topup-promotion.service.js";
 import { creditWalletTopUp } from "./wallet.service.js";
 
 const PACKAGE_CATALOG = Object.freeze([
@@ -56,45 +59,16 @@ function buildWalletTopUpOrderCode() {
   return `WRTP-${timestampPart}-${randomPart}`;
 }
 
-async function findApplicableTopupPromotion(userId, amount) {
-  const now = new Date();
-  const promotions = await TopupPromotion.find({
-    isActive: true,
-    startsAt: { $lte: now },
-    endsAt: { $gte: now },
-    minimumAmount: { $lte: amount },
-  }).sort({ bonusPercent: -1, createdAt: 1 });
-
-  for (const promotion of promotions) {
-    const usageCount = await PaymentOrder.countDocuments({
-      user: userId,
-      promotion: promotion._id,
-      status: { $in: [ORDER_STATUS.PENDING, ORDER_STATUS.PAID] },
-      transactionType: "topup",
-    });
-    if (usageCount < promotion.perUserLimit) return promotion;
-  }
-  return null;
-}
-
-function calculatePromotionBonus(amount, promotion) {
-  if (!promotion) return 0;
-  const calculated = Math.floor((amount * promotion.bonusPercent) / 100);
-  return promotion.maximumBonus == null ? calculated : Math.min(calculated, promotion.maximumBonus);
-}
-
-async function buildTopupFields(userId, amount) {
-  const promotion = await findApplicableTopupPromotion(userId, amount);
-  const bonusAmount = calculatePromotionBonus(amount, promotion);
+async function buildTopupFields(userId, amount, options = {}) {
+  const promotionFields = await buildLockedTopupPromotionFields(userId, amount, {
+    promotionIds: options.promotionIds,
+  });
   return {
     transactionType: "topup",
     orderType: "wallet_top_up",
     amount,
     baseAmount: amount,
-    bonusAmount,
-    totalCredit: amount + bonusAmount,
-    promotion: promotion?._id ?? null,
-    promotionName: promotion?.name ?? null,
+    ...promotionFields,
   };
 }
 
@@ -116,6 +90,8 @@ async function finalizePaidOrder(order) {
     return order;
   }
 
+  await refreshTopupPromotionFields(order);
+  await order.save();
   const totals = await creditWalletTopUp(order);
   const balanceAfter = (totals.walletBalance ?? 0) + (totals.walletPromotionBalance ?? 0);
   order.balanceAfter = balanceAfter;
@@ -150,7 +126,9 @@ export async function createOrder(userId, payload) {
 export async function createWalletTopUpCheckout(user, payload, options = {}) {
   const orderCode = buildWalletTopUpOrderCode();
   const note = payload.note?.trim() ?? "";
-  const topupFields = await buildTopupFields(user._id, payload.amount);
+  const topupFields = await buildTopupFields(user._id, payload.amount, {
+    promotionIds: payload.promotionIds,
+  });
   const order = await PaymentOrder.create({
     ...topupFields,
     user: user._id,

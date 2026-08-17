@@ -105,5 +105,26 @@ describe("wallet top-up and spending", () => {
       totalDeposited: 10000,
       totalSpent: 500,
     });
+
+    const transactions = updatedWalletResponse.body.data.transactions;
+    expect(transactions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "top_up",
+          balanceAfter: 10000,
+          promotionBalanceAfter: 0,
+        }),
+        expect.objectContaining({
+          type: "promotion_credit",
+          balanceAfter: 10000,
+          promotionBalanceAfter: 1000,
+        }),
+        expect.objectContaining({
+          type: "spend",
+          balanceAfter: 10000,
+          promotionBalanceAfter: 500,
+        }),
+      ]),
+    );
   });
 });
