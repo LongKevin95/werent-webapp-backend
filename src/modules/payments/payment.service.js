@@ -10,6 +10,11 @@ import {
 } from "../../services/sepay.service.js";
 import PaymentOrder from "./payment.model.js";
 import {
+  sendTopUpFailedNotification,
+  sendTopUpSuccessNotification,
+} from "../notifications/notification.service.js";
+import User from "../users/user.model.js";
+import {
   buildLockedTopupPromotionFields,
   refreshTopupPromotionFields,
 } from "./topup-promotion.service.js";
@@ -40,7 +45,9 @@ function normalizeCallbackOrigin(origin) {
 }
 
 function buildWalletCallbackUrls(origin, orderCode) {
-  const fallbackOrigin = normalizeCallbackOrigin(env.CORS_ORIGIN?.split(",")[0]) || "http://localhost:5173";
+  const fallbackOrigin =
+    normalizeCallbackOrigin(env.CORS_ORIGIN?.split(",")[0]) ||
+    "http://localhost:5173";
   const callbackOrigin = normalizeCallbackOrigin(origin) || fallbackOrigin;
   const baseUrl = new URL("/wallet", callbackOrigin);
   baseUrl.searchParams.set("orderCode", orderCode);
@@ -50,7 +57,11 @@ function buildWalletCallbackUrls(origin, orderCode) {
   successUrl.searchParams.set("payment", "success");
   errorUrl.searchParams.set("payment", "error");
   cancelUrl.searchParams.set("payment", "cancel");
-  return { successUrl: successUrl.toString(), errorUrl: errorUrl.toString(), cancelUrl: cancelUrl.toString() };
+  return {
+    successUrl: successUrl.toString(),
+    errorUrl: errorUrl.toString(),
+    cancelUrl: cancelUrl.toString(),
+  };
 }
 
 function buildWalletTopUpOrderCode() {
@@ -60,9 +71,13 @@ function buildWalletTopUpOrderCode() {
 }
 
 async function buildTopupFields(userId, amount, options = {}) {
-  const promotionFields = await buildLockedTopupPromotionFields(userId, amount, {
-    promotionIds: options.promotionIds,
-  });
+  const promotionFields = await buildLockedTopupPromotionFields(
+    userId,
+    amount,
+    {
+      promotionIds: options.promotionIds,
+    },
+  );
   return {
     transactionType: "topup",
     orderType: "wallet_top_up",
@@ -79,12 +94,54 @@ async function assertUniqueProviderTransaction(order, transactionId) {
     _id: { $ne: order._id },
   });
   if (duplicate) {
-    throw new ApiError(409, "Giao dịch từ cổng thanh toán đã được ghi nhận cho đơn khác.");
+    throw new ApiError(
+      409,
+      "Giao dịch từ cổng thanh toán đã được ghi nhận cho đơn khác.",
+    );
   }
 }
 
+function isWalletTopUpOrder(order) {
+  return (
+    order.transactionType === "topup" || order.orderType === "wallet_top_up"
+  );
+}
+
+function mapFailedOrderStatus(status) {
+  return ["cancel", "cancelled", "canceled"].includes(
+    String(status ?? "").toLowerCase(),
+  )
+    ? ORDER_STATUS.CANCELED
+    : ORDER_STATUS.FAILED;
+}
+
+async function finalizeFailedOrder(order, transaction, providerOrderId = null) {
+  if (order.status === ORDER_STATUS.PAID) {
+    return order;
+  }
+
+  const shouldNotify = ![ORDER_STATUS.FAILED, ORDER_STATUS.CANCELED].includes(
+    order.status,
+  );
+
+  order.status = mapFailedOrderStatus(transaction.status);
+  order.providerOrderId = providerOrderId ?? order.providerOrderId;
+  order.providerTransactionId =
+    transaction.transactionId ?? order.providerTransactionId;
+  order.rawWebhookPayload = transaction.rawPayload;
+  await order.save();
+
+  if (!shouldNotify || !isWalletTopUpOrder(order)) {
+    return order;
+  }
+
+  const user = await User.findById(order.user);
+  await sendTopUpFailedNotification(user, order).catch(() => null);
+  return order;
+}
+
 async function finalizePaidOrder(order) {
-  if (order.transactionType !== "topup" && order.orderType !== "wallet_top_up") {
+  if (!isWalletTopUpOrder(order)) {
     order.creditedAt = order.creditedAt ?? order.paidAt ?? new Date();
     await order.save();
     return order;
@@ -93,11 +150,16 @@ async function finalizePaidOrder(order) {
   await refreshTopupPromotionFields(order);
   await order.save();
   const totals = await creditWalletTopUp(order);
-  const balanceAfter = (totals.walletBalance ?? 0) + (totals.walletPromotionBalance ?? 0);
+  const balanceAfter =
+    (totals.walletBalance ?? 0) + (totals.walletPromotionBalance ?? 0);
   order.balanceAfter = balanceAfter;
   order.balanceBefore = balanceAfter - (order.totalCredit || order.amount);
   order.creditedAt = order.creditedAt ?? new Date();
   await order.save();
+
+  const user = await User.findById(order.user);
+  await sendTopUpSuccessNotification(user, order).catch(() => null);
+
   return order;
 }
 
@@ -107,7 +169,8 @@ export function listPackages() {
 
 export async function createOrder(userId, payload) {
   const selectedPackage = getPackageByCode(payload.packageCode);
-  if (!selectedPackage) throw new ApiError(404, "Không tìm thấy gói thanh toán.");
+  if (!selectedPackage)
+    throw new ApiError(404, "Không tìm thấy gói thanh toán.");
   return PaymentOrder.create({
     user: userId,
     packageCode: selectedPackage.code,
@@ -151,7 +214,12 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
   });
   return {
     order,
-    checkout: { actionUrl: env.SEPAY_CHECKOUT_URL, method: "POST", fields: checkoutFields, expiresAt: order.expiresAt },
+    checkout: {
+      actionUrl: env.SEPAY_CHECKOUT_URL,
+      method: "POST",
+      fields: checkoutFields,
+      expiresAt: order.expiresAt,
+    },
   };
 }
 
@@ -178,52 +246,70 @@ export function getPaymentHistory(userId) {
   return PaymentOrder.find({ user: userId }).sort({ createdAt: -1 });
 }
 
-export async function handleSepayWebhook(payload, signature, signedPayload = payload) {
-  if (!verifySepaySignature(signedPayload, signature)) throw new ApiError(401, "Webhook signature không hợp lệ.");
+export async function handleSepayWebhook(
+  payload,
+  signature,
+  signedPayload = payload,
+) {
+  if (!verifySepaySignature(signedPayload, signature))
+    throw new ApiError(401, "Webhook signature không hợp lệ.");
   const transaction = normalizeSepayTransaction(payload);
-  if (!transaction.orderCode) throw new ApiError(400, "Webhook không có orderCode.");
-  const order = await PaymentOrder.findOne({ orderCode: transaction.orderCode });
+  if (!transaction.orderCode)
+    throw new ApiError(400, "Webhook không có orderCode.");
+  const order = await PaymentOrder.findOne({
+    orderCode: transaction.orderCode,
+  });
   if (!order) throw new ApiError(404, "Không tìm thấy đơn thanh toán.");
   await assertUniqueProviderTransaction(order, transaction.transactionId);
 
   if (transaction.status !== "paid") {
-    if (order.status !== ORDER_STATUS.PAID) {
-      order.status = ORDER_STATUS.FAILED;
-      order.providerTransactionId = transaction.transactionId;
-      order.rawWebhookPayload = transaction.rawPayload;
-      await order.save();
-    }
-    return order;
+    return finalizeFailedOrder(order, transaction);
   }
-  if (Number(transaction.amount) < Number(order.amount)) throw new ApiError(400, "Số tiền nhận được không đủ cho giao dịch.");
+  if (Number(transaction.amount) < Number(order.amount))
+    throw new ApiError(400, "Số tiền nhận được không đủ cho giao dịch.");
   if (order.status === ORDER_STATUS.PAID && order.creditedAt) return order;
 
   const paidAt = new Date();
   const claimedOrder = await PaymentOrder.findOneAndUpdate(
     { _id: order._id, status: { $ne: ORDER_STATUS.PAID } },
-    { $set: { status: ORDER_STATUS.PAID, paidAt, confirmedAt: paidAt, providerTransactionId: transaction.transactionId, rawWebhookPayload: transaction.rawPayload } },
+    {
+      $set: {
+        status: ORDER_STATUS.PAID,
+        paidAt,
+        confirmedAt: paidAt,
+        providerTransactionId: transaction.transactionId,
+        rawWebhookPayload: transaction.rawPayload,
+      },
+    },
     { returnDocument: "after" },
   );
-  return finalizePaidOrder(claimedOrder ?? await PaymentOrder.findById(order._id));
+  return finalizePaidOrder(
+    claimedOrder ?? (await PaymentOrder.findById(order._id)),
+  );
 }
 
 export async function handleSepayIpn(payload, secret) {
-  if (!verifySepayIpnSecret(secret)) throw new ApiError(401, "IPN secret không hợp lệ.");
+  if (!verifySepayIpnSecret(secret))
+    throw new ApiError(401, "IPN secret không hợp lệ.");
   const transaction = normalizeSepayTransaction(payload);
-  if (!transaction.orderCode) throw new ApiError(400, "IPN không có mã đơn hàng.");
-  const order = await PaymentOrder.findOne({ orderCode: transaction.orderCode });
+  if (!transaction.orderCode)
+    throw new ApiError(400, "IPN không có mã đơn hàng.");
+  const order = await PaymentOrder.findOne({
+    orderCode: transaction.orderCode,
+  });
   if (!order) throw new ApiError(404, "Không tìm thấy đơn thanh toán.");
-  if (Number(transaction.amount) !== Number(order.amount)) throw new ApiError(400, "Số tiền IPN không khớp với đơn thanh toán.");
+  if (Number(transaction.amount) !== Number(order.amount))
+    throw new ApiError(400, "Số tiền IPN không khớp với đơn thanh toán.");
   await assertUniqueProviderTransaction(order, transaction.transactionId);
 
-  order.providerOrderId = payload.order?.id ?? order.providerOrderId;
-  order.providerTransactionId = transaction.transactionId ?? order.providerTransactionId;
-  order.rawWebhookPayload = transaction.rawPayload;
   if (transaction.status !== "paid") {
-    if (order.status !== ORDER_STATUS.PAID) order.status = ORDER_STATUS.FAILED;
-    await order.save();
-    return order;
+    return finalizeFailedOrder(order, transaction, payload.order?.id ?? null);
   }
+
+  order.providerOrderId = payload.order?.id ?? order.providerOrderId;
+  order.providerTransactionId =
+    transaction.transactionId ?? order.providerTransactionId;
+  order.rawWebhookPayload = transaction.rawPayload;
   if (order.status === ORDER_STATUS.PAID && order.creditedAt) return order;
   order.status = ORDER_STATUS.PAID;
   order.paidAt = order.paidAt ?? new Date();

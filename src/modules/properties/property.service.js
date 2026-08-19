@@ -9,6 +9,7 @@ import {
   assertWalletCanSpend,
   spendWalletForListing,
 } from "../payments/wallet.service.js";
+import { sendListingStatusNotification } from "../notifications/notification.service.js";
 import Property from "./property.model.js";
 import User from "../users/user.model.js";
 
@@ -231,7 +232,10 @@ export async function getPropertyById(propertyId) {
 export async function createProperty(ownerId, payload, files = []) {
   const owner = await User.findById(ownerId);
   const isAdmin = owner?.roles?.includes(ROLES.ADMIN);
-  if (!owner || (!isAdmin && (!owner.canPostListing || owner.kycStatus !== "verified"))) {
+  if (
+    !owner ||
+    (!isAdmin && (!owner.canPostListing || owner.kycStatus !== "verified"))
+  ) {
     throw new ApiError(
       403,
       "Tài khoản cần được KYC xác thực trước khi có thể đăng tin.",
@@ -305,7 +309,10 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
   }
 
   if (!isAdmin && (!actor.canPostListing || actor.kycStatus !== "verified")) {
-    throw new ApiError(403, "Tài khoản cần được KYC xác thực trước khi sửa tin đăng.");
+    throw new ApiError(
+      403,
+      "Tài khoản cần được KYC xác thực trước khi sửa tin đăng.",
+    );
   }
 
   const payloadKeys = Object.keys(payload).filter(
@@ -420,6 +427,8 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
   }
 
   await property.save();
+  await property.populate("owner", "fullName email phone");
+  await sendListingStatusNotification(property).catch(() => null);
   return property;
 }
 

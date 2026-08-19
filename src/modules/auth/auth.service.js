@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import ApiError from "../../common/ApiError.js";
 import { ROLES } from "../../common/constants.js";
 import env from "../../config/env.js";
+import { sendWelcomeNotification } from "../notifications/notification.service.js";
 import User from "../users/user.model.js";
 
 export function serializeUser(user) {
@@ -110,6 +111,8 @@ export async function registerUser(payload) {
     roles,
     isActive: true,
   });
+
+  await sendWelcomeNotification(user).catch(() => null);
 
   return {
     accessToken: signAccessToken(user),
