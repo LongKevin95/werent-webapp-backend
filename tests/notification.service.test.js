@@ -10,6 +10,7 @@ vi.mock("../src/config/novu.js", () => novuMocks);
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
+process.env.APP_BASE_URL = "https://app.werent.vn";
 process.env.NOVU_WELCOME_WORKFLOW_ID = "welcome-new-account";
 process.env.NOVU_LISTING_STATUS_WORKFLOW_ID = "listing-status-updated";
 process.env.NOVU_ACCOUNT_KYC_WORKFLOW_ID = "account-kyc-reviewed";
@@ -64,6 +65,14 @@ describe("notification service", () => {
         fullName: "Nguyễn Văn Test",
         email: "test@example.com",
         phone: "0901234567",
+        subject: "Chào mừng bạn đến với WeRent",
+        body: "Nguyễn Văn Test đã tạo tài khoản thành công trên WeRent. Bây giờ bạn có thể khám phá chỗ ở, quản lý lịch hẹn và sử dụng ví tiền ngay trong ứng dụng.",
+        previewText: "Tài khoản WeRent của bạn đã sẵn sàng để sử dụng.",
+        recipientName: "Nguyễn Văn Test",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Khám phá WeRent",
+        ctaUrl: "https://app.werent.vn/",
       },
     });
   });
@@ -109,6 +118,13 @@ describe("notification service", () => {
         rejectionReason: "Thiếu thông tin pháp lý.",
         subject: "Tin đăng bị từ chối",
         body: 'Tin đăng "Căn hộ kiểm duyệt" đã bị từ chối. Lý do: Thiếu thông tin pháp lý.',
+        previewText: "Tin đăng bị từ chối",
+        recipientName: "Nguyễn Chủ Nhà",
+        email: "owner@example.com",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Mở WeRent",
+        ctaUrl: "https://app.werent.vn/",
       },
     });
   });
@@ -154,6 +170,13 @@ describe("notification service", () => {
         adminNote: "Vui lòng chụp ảnh sáng hơn.",
         subject: "Hồ sơ KYC bị từ chối",
         body: "Hồ sơ KYC của bạn đã bị từ chối. Lý do: Thiếu ảnh selfie rõ mặt.",
+        previewText: "Hồ sơ KYC bị từ chối",
+        recipientName: "Nguyễn Người Dùng",
+        email: "kyc-user@example.com",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Xem hồ sơ",
+        ctaUrl: "https://app.werent.vn/",
       },
     });
   });
@@ -209,6 +232,13 @@ describe("notification service", () => {
         adminNote: "Vui lòng tải lại ảnh đủ 4 góc.",
         subject: "Hồ sơ xác thực tin đăng cần bổ sung",
         body: 'Hồ sơ xác thực của tin đăng "Căn hộ xác thực" cần được bổ sung. Lý do: Thiếu ảnh sổ hồng rõ nét.',
+        previewText: "Hồ sơ xác thực tin đăng cần bổ sung",
+        recipientName: "Nguyễn Chủ Nhà",
+        email: "listing-user@example.com",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Mở WeRent",
+        ctaUrl: "https://app.werent.vn/",
       },
     });
   });
@@ -258,6 +288,13 @@ describe("notification service", () => {
         balanceAfter: 250000,
         subject: "Nạp tiền ví thành công",
         body: "Bạn đã nạp thành công 100.000đ vào ví WeRent và nhận thêm 10.000đ ưu đãi. Tổng cộng 110.000đ đã được cộng vào tài khoản của bạn.",
+        previewText: "Nạp tiền ví thành công",
+        recipientName: "Nguyễn Nạp Tiền",
+        email: "wallet-user@example.com",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Mở ví tiền",
+        ctaUrl: "https://app.werent.vn/wallet",
       },
     });
   });
@@ -309,6 +346,13 @@ describe("notification service", () => {
         balanceAfter: 150000,
         subject: "Ví tiền vừa được cộng thêm số dư",
         body: "Quản trị viên đã cộng 50.000đ vào ví WeRent của bạn. Lý do: Hoàn tiền hỗ trợ khách hàng. Số dư hiện tại: 150.000đ.",
+        previewText: "Ví tiền vừa được cộng thêm số dư",
+        recipientName: "Nguyễn Điều Chỉnh Ví",
+        email: "wallet-adjustment@example.com",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Mở ví tiền",
+        ctaUrl: "https://app.werent.vn/wallet",
       },
     });
   });
@@ -356,6 +400,13 @@ describe("notification service", () => {
         provider: "sepay",
         subject: "Nạp tiền ví không thành công",
         body: "Yêu cầu nạp 150.000đ vào ví WeRent không thành công. Vui lòng thử lại hoặc kiểm tra với ngân hàng/cổng thanh toán nếu cần.",
+        previewText: "Nạp tiền ví không thành công",
+        recipientName: "Nguyễn Giao Dịch Lỗi",
+        email: "wallet-failed@example.com",
+        appName: "WeRent",
+        appUrl: "https://app.werent.vn",
+        ctaLabel: "Mở ví tiền",
+        ctaUrl: "https://app.werent.vn/wallet",
       },
     });
   });
