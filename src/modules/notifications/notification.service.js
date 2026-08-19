@@ -24,6 +24,53 @@ function formatCurrency(amount) {
   return `${Number(amount ?? 0).toLocaleString("vi-VN")}đ`;
 }
 
+function normalizeBaseUrl(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmedValue).toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function getAppBaseUrl() {
+  return (
+    normalizeBaseUrl(env.APP_BASE_URL) ||
+    normalizeBaseUrl(env.CORS_ORIGIN?.split(",")[0]) ||
+    "http://localhost:5173"
+  );
+}
+
+function buildAppUrl(pathname = "/") {
+  return new URL(pathname, `${getAppBaseUrl()}/`).toString();
+}
+
+function buildNotificationPayload(user, payload, content, options = {}) {
+  const appUrl = getAppBaseUrl();
+
+  return {
+    ...payload,
+    subject: content.subject,
+    body: content.body,
+    previewText: options.previewText ?? content.subject,
+    recipientName: user.fullName ?? "bạn",
+    email: user.email ?? null,
+    appName: "WeRent",
+    appUrl,
+    ctaLabel: options.ctaLabel ?? "Mở WeRent",
+    ctaUrl: options.ctaUrl ?? appUrl,
+  };
+}
+
 function mapSubscriber(user) {
   return {
     subscriberId: user._id.toString(),
@@ -48,6 +95,13 @@ async function triggerNotification(workflowId, user, payload, errorLabel) {
     console.error(errorLabel, error);
     return null;
   }
+}
+
+function buildWelcomeNotification(user) {
+  return {
+    subject: "Chào mừng bạn đến với WeRent",
+    body: `${user.fullName ?? "Bạn"} đã tạo tài khoản thành công trên WeRent. Bây giờ bạn có thể khám phá chỗ ở, quản lý lịch hẹn và sử dụng ví tiền ngay trong ứng dụng.`,
+  };
 }
 
 function buildListingStatusNotification(property) {
@@ -166,15 +220,26 @@ function buildAdminWalletAdjustmentNotification(order, direction) {
 }
 
 export function sendWelcomeNotification(user) {
+  const content = buildWelcomeNotification(user);
+
   return triggerNotification(
     env.NOVU_WELCOME_WORKFLOW_ID,
     user,
-    {
-      userId: user._id.toString(),
-      fullName: user.fullName,
-      email: user.email ?? null,
-      phone: user.phone ?? null,
-    },
+    buildNotificationPayload(
+      user,
+      {
+        userId: user._id.toString(),
+        fullName: user.fullName,
+        email: user.email ?? null,
+        phone: user.phone ?? null,
+      },
+      content,
+      {
+        previewText: "Tài khoản WeRent của bạn đã sẵn sàng để sử dụng.",
+        ctaLabel: "Khám phá WeRent",
+        ctaUrl: buildAppUrl("/"),
+      },
+    ),
     "Novu welcome notification failed:",
   );
 }
@@ -191,15 +256,21 @@ export function sendListingStatusNotification(property) {
   return triggerNotification(
     env.NOVU_LISTING_STATUS_WORKFLOW_ID,
     owner,
-    {
-      propertyId: property._id.toString(),
-      propertyTitle: property.title,
-      status: property.status,
-      moderationReason: property.moderationReason ?? null,
-      rejectionReason: property.rejectionReason ?? null,
-      subject: content.subject,
-      body: content.body,
-    },
+    buildNotificationPayload(
+      owner,
+      {
+        propertyId: property._id.toString(),
+        propertyTitle: property.title,
+        status: property.status,
+        moderationReason: property.moderationReason ?? null,
+        rejectionReason: property.rejectionReason ?? null,
+      },
+      content,
+      {
+        ctaLabel: "Mở WeRent",
+        ctaUrl: buildAppUrl("/"),
+      },
+    ),
     "Novu listing status notification failed:",
   );
 }
@@ -214,14 +285,21 @@ export function sendAccountKycReviewNotification(user, item) {
   return triggerNotification(
     env.NOVU_ACCOUNT_KYC_WORKFLOW_ID,
     user,
-    {
-      requestId: item._id.toString(),
-      status: item.status,
-      reason: item.rejectionReason ?? null,
-      adminNote: item.adminNote ?? null,
-      subject: content.subject,
-      body: content.body,
-    },
+    buildNotificationPayload(
+      user,
+      {
+        requestId: item._id.toString(),
+        status: item.status,
+        reason: item.rejectionReason ?? null,
+        adminNote: item.adminNote ?? null,
+      },
+      content,
+      {
+        ctaLabel:
+          item.status === KYC_STATUS.VERIFIED ? "Mở WeRent" : "Xem hồ sơ",
+        ctaUrl: buildAppUrl("/"),
+      },
+    ),
     "Novu account KYC notification failed:",
   );
 }
@@ -240,16 +318,22 @@ export function sendListingVerificationReviewNotification(
   return triggerNotification(
     env.NOVU_LISTING_VERIFICATION_WORKFLOW_ID,
     user,
-    {
-      requestId: item._id.toString(),
-      propertyId: property._id.toString(),
-      propertyTitle: property.title,
-      status: item.status,
-      reason: item.rejectionReason ?? null,
-      adminNote: item.adminNote ?? null,
-      subject: content.subject,
-      body: content.body,
-    },
+    buildNotificationPayload(
+      user,
+      {
+        requestId: item._id.toString(),
+        propertyId: property._id.toString(),
+        propertyTitle: property.title,
+        status: item.status,
+        reason: item.rejectionReason ?? null,
+        adminNote: item.adminNote ?? null,
+      },
+      content,
+      {
+        ctaLabel: "Mở WeRent",
+        ctaUrl: buildAppUrl("/"),
+      },
+    ),
     "Novu listing verification notification failed:",
   );
 }
@@ -264,16 +348,22 @@ export function sendTopUpSuccessNotification(user, order) {
   return triggerNotification(
     env.NOVU_TOPUP_SUCCESS_WORKFLOW_ID,
     user,
-    {
-      orderId: order._id.toString(),
-      orderCode: order.orderCode,
-      amount: Number(order.amount ?? 0),
-      bonusAmount: Number(order.bonusAmount ?? 0),
-      totalCredit: Number(order.totalCredit ?? order.amount ?? 0),
-      balanceAfter: Number(order.balanceAfter ?? 0),
-      subject: content.subject,
-      body: content.body,
-    },
+    buildNotificationPayload(
+      user,
+      {
+        orderId: order._id.toString(),
+        orderCode: order.orderCode,
+        amount: Number(order.amount ?? 0),
+        bonusAmount: Number(order.bonusAmount ?? 0),
+        totalCredit: Number(order.totalCredit ?? order.amount ?? 0),
+        balanceAfter: Number(order.balanceAfter ?? 0),
+      },
+      content,
+      {
+        ctaLabel: "Mở ví tiền",
+        ctaUrl: buildAppUrl("/wallet"),
+      },
+    ),
     "Novu top-up success notification failed:",
   );
 }
@@ -288,15 +378,21 @@ export function sendTopUpFailedNotification(user, order) {
   return triggerNotification(
     env.NOVU_TOPUP_FAILED_WORKFLOW_ID,
     user,
-    {
-      orderId: order._id.toString(),
-      orderCode: order.orderCode,
-      amount: Number(order.amount ?? 0),
-      status: order.status,
-      provider: order.provider ?? null,
-      subject: content.subject,
-      body: content.body,
-    },
+    buildNotificationPayload(
+      user,
+      {
+        orderId: order._id.toString(),
+        orderCode: order.orderCode,
+        amount: Number(order.amount ?? 0),
+        status: order.status,
+        provider: order.provider ?? null,
+      },
+      content,
+      {
+        ctaLabel: "Mở ví tiền",
+        ctaUrl: buildAppUrl("/wallet"),
+      },
+    ),
     "Novu top-up failed notification failed:",
   );
 }
@@ -311,17 +407,23 @@ export function sendAdminWalletAdjustmentNotification(user, order, direction) {
   return triggerNotification(
     env.NOVU_ADMIN_WALLET_ADJUSTMENT_WORKFLOW_ID,
     user,
-    {
-      orderId: order._id.toString(),
-      orderCode: order.orderCode,
-      amount: Math.abs(Number(order.amount ?? 0)),
-      direction,
-      reason: order.adjustmentReason ?? null,
-      balanceBefore: Number(order.balanceBefore ?? 0),
-      balanceAfter: Number(order.balanceAfter ?? 0),
-      subject: content.subject,
-      body: content.body,
-    },
+    buildNotificationPayload(
+      user,
+      {
+        orderId: order._id.toString(),
+        orderCode: order.orderCode,
+        amount: Math.abs(Number(order.amount ?? 0)),
+        direction,
+        reason: order.adjustmentReason ?? null,
+        balanceBefore: Number(order.balanceBefore ?? 0),
+        balanceAfter: Number(order.balanceAfter ?? 0),
+      },
+      content,
+      {
+        ctaLabel: "Mở ví tiền",
+        ctaUrl: buildAppUrl("/wallet"),
+      },
+    ),
     "Novu admin wallet adjustment notification failed:",
   );
 }

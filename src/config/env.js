@@ -9,6 +9,15 @@ const optionalString = z.preprocess((value) => {
   return trimmedValue.length > 0 ? trimmedValue : undefined;
 }, z.string().trim().optional());
 
+const optionalUrl = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 ? trimmedValue : undefined;
+}, z.string().trim().url().optional());
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -18,6 +27,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().trim().min(1).default("werent-dev-secret"),
   JWT_EXPIRES_IN: z.string().trim().min(1).default("7d"),
   CORS_ORIGIN: optionalString,
+  APP_BASE_URL: optionalUrl,
   NOVU_SECRET_KEY: optionalString,
   NOVU_WELCOME_WORKFLOW_ID: z
     .string()
