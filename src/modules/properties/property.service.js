@@ -5,7 +5,13 @@ import {
   ROLES,
 } from "../../common/constants.js";
 import { deleteAsset, uploadFiles } from "../../services/cloudinary.service.js";
+import {
+  assertWalletCanSpend,
+  spendWalletForListing,
+} from "../payments/wallet.service.js";
+import { sendListingStatusNotification } from "../notifications/notification.service.js";
 import Property from "./property.model.js";
+import User from "../users/user.model.js";
 
 function serializePropertyImage(image) {
   return {
@@ -68,9 +74,15 @@ function buildUpdatedPropertyImages(currentImages, uploadedImages, payload) {
     payload.imageOrder.forEach((item) => {
       if (item.source === "existing") {
         const existingImage = getExistingImageFromMap(currentImageMap, item);
-        const existingKey = existingImage ? getPropertyImageKey(existingImage) : "";
+        const existingKey = existingImage
+          ? getPropertyImageKey(existingImage)
+          : "";
 
-        if (existingImage && existingKey && !usedExistingKeys.has(existingKey)) {
+        if (
+          existingImage &&
+          existingKey &&
+          !usedExistingKeys.has(existingKey)
+        ) {
           orderedImages.push(existingImage);
           usedExistingKeys.add(existingKey);
         }
@@ -218,20 +230,37 @@ export async function getPropertyById(propertyId) {
 }
 
 export async function createProperty(ownerId, payload, files = []) {
-  const uploadedImages = await uploadFiles(files, {
-    folder: "werent/properties",
-  });
+  const owner = await User.findById(ownerId);
+  const isAdmin = owner?.roles?.includes(ROLES.ADMIN);
+  if (
+    !owner ||
+    (!isAdmin && (!owner.canPostListing || owner.kycStatus !== "verified"))
+  ) {
+    throw new ApiError(
+      403,
+      "Tài khoản cần được KYC xác thực trước khi có thể đăng tin.",
+    );
+  }
   const requestedStatus =
     payload.status === PROPERTY_STATUS.DRAFT
       ? PROPERTY_STATUS.DRAFT
       : PROPERTY_STATUS.PENDING;
+  const listingPackagePrice =
+    requestedStatus === PROPERTY_STATUS.DRAFT
+      ? 0
+      : Number(payload.package?.totalPrice ?? 0);
+
+  await assertWalletCanSpend(ownerId, listingPackagePrice);
+
+  const uploadedImages = await uploadFiles(files, {
+    folder: "werent/properties",
+  });
   const { status: _status, ...propertyFields } = payload;
 
   const propertyPayload = {
     ...propertyFields,
     status: requestedStatus,
-    publishedAt:
-      requestedStatus === PROPERTY_STATUS.ACTIVE ? new Date() : null,
+    publishedAt: requestedStatus === PROPERTY_STATUS.ACTIVE ? new Date() : null,
     owner: ownerId,
     images: uploadedImages.map((image) => ({
       url: image.secureUrl,
@@ -239,7 +268,29 @@ export async function createProperty(ownerId, payload, files = []) {
     })),
   };
 
-  return Property.create(propertyPayload);
+  const property = await Property.create(propertyPayload);
+
+  try {
+    await spendWalletForListing(ownerId, listingPackagePrice, {
+      description: "Thanh toán gói đăng tin",
+      propertyId: property._id,
+      metadata: {
+        package: property.package,
+        propertyTitle: property.title,
+      },
+    });
+  } catch (error) {
+    await property.deleteOne().catch(() => null);
+    await Promise.all(
+      uploadedImages
+        .map((image) => image.publicId)
+        .filter(Boolean)
+        .map((publicId) => deleteAsset(publicId).catch(() => null)),
+    );
+    throw error;
+  }
+
+  return property;
 }
 
 export async function updateProperty(propertyId, actor, payload, files = []) {
@@ -257,11 +308,20 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
     throw new ApiError(403, "Bạn không thể chỉnh sửa tin đăng này.");
   }
 
+  if (!isAdmin && (!actor.canPostListing || actor.kycStatus !== "verified")) {
+    throw new ApiError(
+      403,
+      "Tài khoản cần được KYC xác thực trước khi sửa tin đăng.",
+    );
+  }
+
   const payloadKeys = Object.keys(payload).filter(
     (key) => !["existingImages", "imageOrder"].includes(key),
   );
   const isStatusOnlyUpdate =
-    files.length === 0 && payloadKeys.length === 1 && payloadKeys[0] === "status";
+    files.length === 0 &&
+    payloadKeys.length === 1 &&
+    payloadKeys[0] === "status";
 
   if (!isAdmin && isStatusOnlyUpdate) {
     const isAllowedVisibilityTransition =
@@ -271,7 +331,10 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
         payload.status === PROPERTY_STATUS.ACTIVE &&
         !property.moderationReason);
 
-    if (!isAllowedVisibilityTransition && payload.status !== PROPERTY_STATUS.DRAFT) {
+    if (
+      !isAllowedVisibilityTransition &&
+      payload.status !== PROPERTY_STATUS.DRAFT
+    ) {
       throw new ApiError(
         400,
         property.status === PROPERTY_STATUS.HIDDEN && property.moderationReason
@@ -318,10 +381,14 @@ export async function updateProperty(propertyId, actor, payload, files = []) {
     Array.isArray(existingImages) ||
     Array.isArray(imageOrder)
   ) {
-    const nextImages = buildUpdatedPropertyImages(currentImages, uploadedImages, {
-      existingImages,
-      imageOrder,
-    });
+    const nextImages = buildUpdatedPropertyImages(
+      currentImages,
+      uploadedImages,
+      {
+        existingImages,
+        imageOrder,
+      },
+    );
 
     property.images = nextImages;
     await deleteRemovedPropertyImages(currentImages, nextImages);
@@ -347,9 +414,7 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
     ? moderationReason
     : null;
   property.rejectionReason =
-    payload.status === PROPERTY_STATUS.REJECTED
-      ? moderationReason
-      : null;
+    payload.status === PROPERTY_STATUS.REJECTED ? moderationReason : null;
   property.reviewedBy = reviewerId;
   property.reviewedAt = new Date();
 
@@ -362,6 +427,8 @@ export async function updatePropertyStatus(propertyId, reviewerId, payload) {
   }
 
   await property.save();
+  await property.populate("owner", "fullName email phone");
+  await sendListingStatusNotification(property).catch(() => null);
   return property;
 }
 

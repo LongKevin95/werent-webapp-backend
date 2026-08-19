@@ -214,8 +214,8 @@ export async function createUser(payload) {
   const email = User.normalizeEmail(payload.email);
   const phone = User.normalizePhone(payload.phone);
 
-  if (!email && !phone) {
-    throw new ApiError(400, "Cần cung cấp email hoặc số điện thoại.");
+  if (!email || !phone) {
+    throw new ApiError(400, "Cần cung cấp đầy đủ email và số điện thoại.");
   }
 
   await ensureUniqueContact({ email, phone });
@@ -260,6 +260,12 @@ export async function updateUser(userId, actorId, payload) {
 
   await ensureUniqueContact({ email, phone, excludeUserId: userId });
 
+  const identityChanged =
+    user.kycStatus === "verified" &&
+    ((payload.fullName !== undefined && payload.fullName.trim() !== user.fullName) ||
+      (payload.email !== undefined && email !== user.email) ||
+      (payload.phone !== undefined && phone !== user.phone));
+
   if (payload.fullName !== undefined) user.fullName = payload.fullName.trim();
   if (payload.email !== undefined) user.email = email;
   if (payload.phone !== undefined) user.phone = phone;
@@ -267,6 +273,12 @@ export async function updateUser(userId, actorId, payload) {
   if (payload.isActive !== undefined) user.isActive = payload.isActive;
   if (payload.password !== undefined) {
     user.passwordHash = await bcrypt.hash(payload.password, 10);
+  }
+  if (identityChanged) {
+    user.kycStatus = "unverified";
+    user.canPostListing = false;
+    user.verifiedAt = null;
+    user.verifiedBy = null;
   }
 
   await user.save();

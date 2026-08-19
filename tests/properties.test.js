@@ -10,9 +10,12 @@ process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
 
 const { default: app } = await import("../src/app.js");
-const { default: Property } = await import(
-  "../src/modules/properties/property.model.js"
+const { default: Property } =
+  await import("../src/modules/properties/property.model.js");
+const { default: WalletTransaction } = await import(
+  "../src/modules/payments/wallet-transaction.model.js"
 );
+const { default: User } = await import("../src/modules/users/user.model.js");
 
 let mongoServer;
 const tinyPngBuffer = Buffer.from(
@@ -21,11 +24,23 @@ const tinyPngBuffer = Buffer.from(
 );
 
 async function registerUser(email = "owner@example.com") {
-  return request(app).post("/api/auth/register").send({
+  const phone = email
+    .split("")
+    .reduce((total, character) => total + character.charCodeAt(0), 0)
+    .toString()
+    .padStart(7, "0")
+    .slice(-7);
+  const response = await request(app).post("/api/auth/register").send({
     fullName: "Property Owner",
     email,
+    phone: `090${phone}`,
     password: "Password123!",
   });
+  await User.findByIdAndUpdate(response.body.data.user.id, {
+    kycStatus: "verified",
+    canPostListing: true,
+  });
+  return response;
 }
 
 describe("property publishing workflow", () => {
@@ -133,6 +148,14 @@ describe("property publishing workflow", () => {
   it("accepts multipart payloads from the post listing wizard", async () => {
     const registerResponse = await registerUser();
     const token = registerResponse.body.data.accessToken;
+    await WalletTransaction.create({
+      user: registerResponse.body.data.user.id,
+      type: "top_up",
+      direction: "credit",
+      amount: 100000,
+      realAmount: 100000,
+      description: "Test wallet top-up",
+    });
 
     const createResponse = await request(app)
       .post("/api/properties")
@@ -145,10 +168,7 @@ describe("property publishing workflow", () => {
       .field("district", "TP. Thủ Đức")
       .field("price", "12000000")
       .field("amenities", JSON.stringify(["wifi", "camera"]))
-      .field(
-        "coordinates",
-        JSON.stringify({ lat: 10.7721, lng: 106.6983 }),
-      )
+      .field("coordinates", JSON.stringify({ lat: 10.7721, lng: 106.6983 }))
       .field("addressComponents", JSON.stringify([{ kind: "city" }]))
       .field(
         "package",
@@ -198,6 +218,35 @@ describe("property publishing workflow", () => {
     );
 
     expect(imageResponse.status).toBe(200);
+    expect(imageResponse.headers["cross-origin-resource-policy"]).toBe(
+      "cross-origin",
+    );
+  });
+
+  it("ignores image URLs submitted to the public create endpoint", async () => {
+    const registerResponse = await registerUser();
+    const token = registerResponse.body.data.accessToken;
+
+    const createResponse = await request(app)
+      .post("/api/properties")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        title: "Attempted remote image listing",
+        propertyType: "Apartment",
+        address: "123 Test Street",
+        city: "TP. Ho Chi Minh",
+        district: "District 1",
+        price: 9000000,
+        images: [
+          {
+            url: "https://example.com/not-allowed.jpg",
+            publicId: null,
+          },
+        ],
+      });
+
+    expect(createResponse.status).toBe(201);
+    expect(createResponse.body.data.property.images).toEqual([]);
   });
 
   it("returns only the authenticated owner's listings with pagination", async () => {
@@ -366,9 +415,7 @@ describe("property publishing workflow", () => {
       .send({ status: PROPERTY_STATUS.HIDDEN });
 
     expect(hideResponse.status).toBe(200);
-    expect(hideResponse.body.data.property.status).toBe(
-      PROPERTY_STATUS.HIDDEN,
-    );
+    expect(hideResponse.body.data.property.status).toBe(PROPERTY_STATUS.HIDDEN);
 
     const hiddenSearchResponse = await request(app)
       .get("/api/properties")
@@ -383,9 +430,7 @@ describe("property publishing workflow", () => {
       .send({ status: PROPERTY_STATUS.ACTIVE });
 
     expect(showResponse.status).toBe(200);
-    expect(showResponse.body.data.property.status).toBe(
-      PROPERTY_STATUS.ACTIVE,
-    );
+    expect(showResponse.body.data.property.status).toBe(PROPERTY_STATUS.ACTIVE);
     expect(showResponse.body.data.property.publishedAt).toEqual(
       expect.any(String),
     );
@@ -410,9 +455,11 @@ describe("property publishing workflow", () => {
       .send({ status: PROPERTY_STATUS.ACTIVE });
 
     expect(response.status).toBe(400);
-    await expect(Property.findById(property._id).lean()).resolves.toMatchObject({
-      status: PROPERTY_STATUS.PENDING,
-    });
+    await expect(Property.findById(property._id).lean()).resolves.toMatchObject(
+      {
+        status: PROPERTY_STATUS.PENDING,
+      },
+    );
   });
 
   it("prevents users from updating another owner's listing", async () => {
@@ -435,9 +482,11 @@ describe("property publishing workflow", () => {
       .send({ title: "Should not update" });
 
     expect(updateResponse.status).toBe(403);
-    await expect(Property.findById(property._id).lean()).resolves.toMatchObject({
-      title: "Protected update listing",
-    });
+    await expect(Property.findById(property._id).lean()).resolves.toMatchObject(
+      {
+        title: "Protected update listing",
+      },
+    );
   });
 
   it("allows owners to delete their own listings", async () => {

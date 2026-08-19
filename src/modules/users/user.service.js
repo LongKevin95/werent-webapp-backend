@@ -23,6 +23,21 @@ export async function updateProfile(userId, payload) {
 
   const nextEmail = User.normalizeEmail(payload.email);
   const nextPhone = User.normalizePhone(payload.phone);
+
+  if (payload.email !== undefined && nextEmail !== user.email) {
+    throw new ApiError(
+      403,
+      "Không thể tự thay đổi email. Vui lòng liên hệ admin hoặc bộ phận chăm sóc khách hàng.",
+    );
+  }
+
+  if (payload.phone !== undefined && nextPhone !== user.phone) {
+    throw new ApiError(
+      403,
+      "Không thể tự thay đổi số điện thoại. Vui lòng liên hệ admin hoặc bộ phận chăm sóc khách hàng.",
+    );
+  }
+
   const effectiveEmail =
     payload.email !== undefined ? nextEmail : user.email;
   const effectivePhone =
@@ -69,6 +84,20 @@ export async function updateProfile(userId, payload) {
     }
   }
 
+  const identityChanged =
+    user.kycStatus === "verified" &&
+    ((payload.fullName !== undefined && payload.fullName.trim() !== user.fullName) ||
+      (payload.dateOfBirth !== undefined &&
+        String(payload.dateOfBirth ?? "") !== String(user.dateOfBirth ?? "")) ||
+      (payload.address !== undefined &&
+        payload.address.trim() !== (user.address ?? "")) ||
+      (payload.identityNumber !== undefined &&
+        payload.identityNumber.trim() !== (user.identityNumber ?? "")) ||
+      (payload.passportNumber !== undefined &&
+        payload.passportNumber.trim() !== (user.passportNumber ?? "")) ||
+      (payload.taxCode !== undefined &&
+        payload.taxCode.trim() !== (user.taxCode ?? "")));
+
   if (payload.fullName !== undefined) {
     user.fullName = payload.fullName.trim();
   }
@@ -79,6 +108,33 @@ export async function updateProfile(userId, payload) {
 
   if (payload.phone !== undefined) {
     user.phone = nextPhone;
+  }
+
+  if (payload.dateOfBirth !== undefined) {
+    user.dateOfBirth = payload.dateOfBirth;
+  }
+
+  if (payload.address !== undefined) {
+    user.address = payload.address.trim();
+  }
+
+  if (payload.identityNumber !== undefined) {
+    user.identityNumber = payload.identityNumber.trim();
+  }
+
+  if (payload.passportNumber !== undefined) {
+    user.passportNumber = payload.passportNumber.trim();
+  }
+
+  if (payload.taxCode !== undefined) {
+    user.taxCode = payload.taxCode.trim();
+  }
+
+  if (identityChanged) {
+    user.kycStatus = "unverified";
+    user.canPostListing = false;
+    user.verifiedAt = null;
+    user.verifiedBy = null;
   }
 
   await user.save();

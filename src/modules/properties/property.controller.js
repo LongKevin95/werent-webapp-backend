@@ -40,7 +40,11 @@ export const getProperty = asyncHandler(async (req, res) => {
 });
 
 export const createPropertyListing = asyncHandler(async (req, res) => {
-  const property = await createProperty(req.user._id, req.body, req.files ?? []);
+  const property = await createProperty(
+    req.user._id,
+    req.body,
+    req.files ?? [],
+  );
 
   return res.status(201).json({
     success: true,
@@ -68,7 +72,11 @@ export const updatePropertyListing = asyncHandler(async (req, res) => {
 });
 
 export const reviewPropertyListing = asyncHandler(async (req, res) => {
-  const property = await updatePropertyStatus(req.params.propertyId, req.user._id, req.body);
+  const property = await updatePropertyStatus(
+    req.params.propertyId,
+    req.user._id,
+    req.body,
+  );
 
   return res.status(200).json({
     success: true,

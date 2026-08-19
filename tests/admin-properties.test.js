@@ -2,17 +2,36 @@ import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { PROPERTY_STATUS } from "../src/common/constants.js";
+
+const notificationMocks = vi.hoisted(() => ({
+  sendListingStatusNotification: vi.fn(),
+  sendTopUpSuccessNotification: vi.fn(),
+  sendTopUpFailedNotification: vi.fn(),
+  sendAdminWalletAdjustmentNotification: vi.fn(),
+}));
+
+vi.mock(
+  "../src/modules/notifications/notification.service.js",
+  () => notificationMocks,
+);
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "admin-property-test-secret";
 
 const { default: app } = await import("../src/app.js");
 const { signAccessToken } = await import("../src/modules/auth/auth.service.js");
-const { default: Property } = await import(
-  "../src/modules/properties/property.model.js"
-);
+const { default: Property } =
+  await import("../src/modules/properties/property.model.js");
 const { default: User } = await import("../src/modules/users/user.model.js");
 
 let mongoServer;
@@ -27,6 +46,9 @@ describe("admin property moderation", () => {
 
   beforeEach(async () => {
     await mongoose.connection.db.dropDatabase();
+    notificationMocks.sendListingStatusNotification
+      .mockReset()
+      .mockResolvedValue(null);
     const admin = await User.create({
       fullName: "Quản trị viên",
       email: "admin-properties@werent.vn",
@@ -117,6 +139,15 @@ describe("admin property moderation", () => {
       moderationReason: "Hình ảnh không đúng với nội dung mô tả.",
       rejectionReason: "Hình ảnh không đúng với nội dung mô tả.",
     });
+    expect(
+      notificationMocks.sendListingStatusNotification,
+    ).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        title: "Tin cần kiểm duyệt",
+        status: PROPERTY_STATUS.REJECTED,
+      }),
+    );
 
     const approveResponse = await request(app)
       .patch(`/api/admin/properties/${pendingProperty.id}/review`)
@@ -128,6 +159,15 @@ describe("admin property moderation", () => {
     );
     expect(approveResponse.body.data.property.publishedAt).toEqual(
       expect.any(String),
+    );
+    expect(
+      notificationMocks.sendListingStatusNotification,
+    ).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        title: "Tin cần kiểm duyệt",
+        status: PROPERTY_STATUS.ACTIVE,
+      }),
     );
 
     const hideResponse = await request(app)
@@ -142,5 +182,14 @@ describe("admin property moderation", () => {
       status: PROPERTY_STATUS.HIDDEN,
       moderationReason: "Tin có dấu hiệu trùng lặp và cần xác minh.",
     });
+    expect(
+      notificationMocks.sendListingStatusNotification,
+    ).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        title: "Tin cần kiểm duyệt",
+        status: PROPERTY_STATUS.HIDDEN,
+      }),
+    );
   });
 });

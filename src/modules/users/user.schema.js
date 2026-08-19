@@ -4,6 +4,14 @@ import {
   normalizeVietnamPhone,
 } from "../../common/phone.js";
 
+const optionalDateValue = z.preprocess((value) => {
+  if (value === "" || value === null || value === undefined) {
+    return null;
+  }
+
+  return value;
+}, z.coerce.date().nullable());
+
 export const updateProfileSchema = z
   .object({
     fullName: z
@@ -11,14 +19,28 @@ export const updateProfileSchema = z
       .trim()
       .min(1, "Họ và tên không được để trống")
       .optional(),
+    dateOfBirth: optionalDateValue.optional(),
     email: z.string().trim().email("Email không hợp lệ").optional(),
     phone: z.union([z.string(), z.number()]).optional(),
+    address: z.string().trim().max(500).optional(),
+    identityNumber: z.string().trim().max(20).optional(),
+    passportNumber: z.string().trim().max(30).optional(),
+    taxCode: z.string().trim().max(30).optional(),
   })
   .superRefine((data, context) => {
+    const updateableFields = [
+      "fullName",
+      "dateOfBirth",
+      "email",
+      "phone",
+      "address",
+      "identityNumber",
+      "passportNumber",
+      "taxCode",
+    ];
+
     if (
-      data.fullName === undefined &&
-      data.email === undefined &&
-      data.phone === undefined
+      updateableFields.every((field) => data[field] === undefined)
     ) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -37,6 +59,14 @@ export const updateProfileSchema = z
         code: z.ZodIssueCode.custom,
         message: INVALID_PHONE_MESSAGE,
         path: ["phone"],
+      });
+    }
+
+    if (data.dateOfBirth instanceof Date && data.dateOfBirth >= new Date()) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Ngày sinh không hợp lệ.",
+        path: ["dateOfBirth"],
       });
     }
   });

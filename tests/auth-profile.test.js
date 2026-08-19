@@ -1,14 +1,33 @@
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const cloudinaryMocks = vi.hoisted(() => ({
   deleteAsset: vi.fn(),
   uploadFiles: vi.fn(),
 }));
 
+const notificationMocks = vi.hoisted(() => ({
+  sendWelcomeNotification: vi.fn(),
+  sendTopUpSuccessNotification: vi.fn(),
+  sendTopUpFailedNotification: vi.fn(),
+  sendAdminWalletAdjustmentNotification: vi.fn(),
+}));
+
 vi.mock("../src/services/cloudinary.service.js", () => cloudinaryMocks);
+vi.mock(
+  "../src/modules/notifications/notification.service.js",
+  () => notificationMocks,
+);
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
@@ -21,6 +40,7 @@ async function registerUser(overrides = {}) {
   const payload = {
     fullName: "Nguyễn Văn Test",
     email: "test@example.com",
+    phone: "0901234567",
     password: "Password123!",
     ...overrides,
   };
@@ -47,6 +67,9 @@ describe("authentication and profile backlog", () => {
         format: "png",
       },
     ]);
+    notificationMocks.sendWelcomeNotification
+      .mockReset()
+      .mockResolvedValue(null);
   });
 
   afterAll(async () => {
@@ -54,13 +77,13 @@ describe("authentication and profile backlog", () => {
     await mongoServer?.stop();
   });
 
-  it("registers with a Vietnamese mobile number and logs in using normalized variants", async () => {
+  it("registers with email and Vietnamese mobile number then logs in using normalized variants", async () => {
     const registerResponse = await registerUser({
-      email: undefined,
       phone: "0901234567",
     });
 
     expect(registerResponse.status).toBe(201);
+    expect(registerResponse.body.data.user.email).toBe("test@example.com");
     expect(registerResponse.body.data.user.phone).toBe("0901234567");
     expect(registerResponse.body.data.user.roles).toEqual(["user"]);
     expect(registerResponse.body.data.accessToken).toEqual(expect.any(String));
@@ -72,6 +95,43 @@ describe("authentication and profile backlog", () => {
 
     expect(loginResponse.status).toBe(200);
     expect(loginResponse.body.data.user.phone).toBe("0901234567");
+  });
+
+  it("triggers a welcome notification after successful registration", async () => {
+    const registerResponse = await registerUser();
+
+    expect(registerResponse.status).toBe(201);
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullName: "Nguyễn Văn Test",
+        email: "test@example.com",
+        phone: "0901234567",
+      }),
+    );
+  });
+
+  it("keeps registration successful when Novu delivery fails", async () => {
+    notificationMocks.sendWelcomeNotification.mockRejectedValueOnce(
+      new Error("Novu is unavailable"),
+    );
+
+    const registerResponse = await registerUser({
+      email: "fallback@example.com",
+      phone: "0907654321",
+    });
+
+    expect(registerResponse.status).toBe(201);
+    expect(registerResponse.body.data.user.email).toBe("fallback@example.com");
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
+  });
+
+  it("requires both email and phone during registration", async () => {
+    const missingEmailResponse = await registerUser({ email: undefined });
+    expect(missingEmailResponse.status).toBe(400);
+
+    const missingPhoneResponse = await registerUser({ phone: undefined });
+    expect(missingPhoneResponse.status).toBe(400);
   });
 
   it("protects the current-user endpoint with JWT", async () => {
@@ -108,15 +168,42 @@ describe("authentication and profile backlog", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({
         fullName: "Nguyễn Văn Mới",
-        phone: "901111111",
+        dateOfBirth: "1991-05-12",
+        address: "12 Lê Lợi, Quận 1",
+        identityNumber: "079091001234",
+        passportNumber: "P7654321",
+        taxCode: "0311111111",
       });
 
     expect(response.status).toBe(200);
     expect(response.body.data.user).toMatchObject({
       fullName: "Nguyễn Văn Mới",
       email: "test@example.com",
-      phone: "0901111111",
+      address: "12 Lê Lợi, Quận 1",
+      identityNumber: "079091001234",
+      passportNumber: "P7654321",
+      taxCode: "0311111111",
     });
+    expect(response.body.data.user.dateOfBirth).toEqual(expect.any(String));
+  });
+
+  it("prevents users from changing email or phone through profile updates", async () => {
+    const registerResponse = await registerUser({
+      phone: "0901234567",
+    });
+    const token = registerResponse.body.data.accessToken;
+
+    const emailResponse = await request(app)
+      .patch("/api/users/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ email: "new-email@example.com" });
+    expect(emailResponse.status).toBe(403);
+
+    const phoneResponse = await request(app)
+      .patch("/api/users/me")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ phone: "0901111111" });
+    expect(phoneResponse.status).toBe(403);
   });
 
   it("changes the password and accepts only the new password afterward", async () => {
@@ -133,16 +220,20 @@ describe("authentication and profile backlog", () => {
 
     expect(changeResponse.status).toBe(200);
 
-    const oldPasswordResponse = await request(app).post("/api/auth/login").send({
-      identifier: "test@example.com",
-      password: "Password123!",
-    });
+    const oldPasswordResponse = await request(app)
+      .post("/api/auth/login")
+      .send({
+        identifier: "test@example.com",
+        password: "Password123!",
+      });
     expect(oldPasswordResponse.status).toBe(401);
 
-    const newPasswordResponse = await request(app).post("/api/auth/login").send({
-      identifier: "test@example.com",
-      password: "NewPassword456!",
-    });
+    const newPasswordResponse = await request(app)
+      .post("/api/auth/login")
+      .send({
+        identifier: "test@example.com",
+        password: "NewPassword456!",
+      });
     expect(newPasswordResponse.status).toBe(200);
   });
 

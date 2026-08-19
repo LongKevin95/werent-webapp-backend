@@ -16,11 +16,31 @@ const contactFields = {
   phone: z.union([z.string(), z.number()]).optional(),
 };
 
-function validateContactFields(data, context, { requireContact = false } = {}) {
+function validateContactFields(
+  data,
+  context,
+  { requireContact = false, requireBoth = false } = {},
+) {
   const hasEmail = typeof data.email === "string" && data.email.trim().length > 0;
   const hasPhone =
     (typeof data.phone === "string" && data.phone.trim().length > 0) ||
     typeof data.phone === "number";
+
+  if (requireBoth && !hasEmail) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Email là bắt buộc.",
+      path: ["email"],
+    });
+  }
+
+  if (requireBoth && !hasPhone) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Số điện thoại là bắt buộc.",
+      path: ["phone"],
+    });
+  }
 
   if (requireContact && !hasEmail && !hasPhone) {
     context.addIssue({
@@ -81,7 +101,7 @@ export const createAdminUserSchema = z
     isActive: z.boolean().default(true),
   })
   .superRefine((data, context) =>
-    validateContactFields(data, context, { requireContact: true }),
+    validateContactFields(data, context, { requireBoth: true }),
   );
 
 export const updateAdminUserSchema = z

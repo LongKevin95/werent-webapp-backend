@@ -26,11 +26,7 @@ function parseJsonField(value) {
 function parseArrayField(value) {
   const parsedValue = parseJsonField(value);
 
-  if (
-    parsedValue === undefined ||
-    parsedValue === null ||
-    parsedValue === ""
-  ) {
+  if (parsedValue === undefined || parsedValue === null || parsedValue === "") {
     return undefined;
   }
 
@@ -169,7 +165,9 @@ export const updatePropertyStatusSchema = z
   })
   .superRefine((data, context) => {
     if (
-      [PROPERTY_STATUS.REJECTED, PROPERTY_STATUS.HIDDEN].includes(data.status) &&
+      [PROPERTY_STATUS.REJECTED, PROPERTY_STATUS.HIDDEN].includes(
+        data.status,
+      ) &&
       !data.reason?.trim() &&
       !data.rejectionReason?.trim()
     ) {

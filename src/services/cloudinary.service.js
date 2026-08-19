@@ -3,6 +3,7 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import ApiError from "../common/ApiError.js";
+import env from "../config/env.js";
 import cloudinary, { isCloudinaryConfigured } from "../config/cloudinary.js";
 
 const LOCAL_UPLOAD_ROOT = path.join(process.cwd(), "uploads");
@@ -43,6 +44,7 @@ function getUploadExtension(file) {
       "image/jpeg": ".jpg",
       "image/png": ".png",
       "image/webp": ".webp",
+      "application/pdf": ".pdf",
     }[file.mimetype] ?? ".jpg"
   );
 }
@@ -85,6 +87,13 @@ export async function uploadFiles(files, options = {}) {
   }
 
   if (!isCloudinaryConfigured) {
+    if (env.NODE_ENV === "production") {
+      throw new ApiError(
+        503,
+        "Máy chủ chưa được cấu hình lưu trữ ảnh/video production. Vui lòng cấu hình Cloudinary rồi thử lại.",
+      );
+    }
+
     return Promise.all(files.map((file) => saveFileLocally(file, options)));
   }
 

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import ApiError from "../../common/ApiError.js";
 import { ROLES } from "../../common/constants.js";
 import env from "../../config/env.js";
+import { sendWelcomeNotification } from "../notifications/notification.service.js";
 import User from "../users/user.model.js";
 
 export function serializeUser(user) {
@@ -13,7 +14,19 @@ export function serializeUser(user) {
     phone: user.phone ?? null,
     roles: user.roles,
     avatarUrl: user.avatarUrl ?? null,
+    walletBalance: user.walletBalance ?? 0,
+    walletPromotionBalance: user.walletPromotionBalance ?? 0,
     isActive: user.isActive,
+    dateOfBirth: user.dateOfBirth ?? null,
+    address: user.address ?? "",
+    identityNumber: user.identityNumber ?? "",
+    identityIssuedAt: user.identityIssuedAt ?? null,
+    passportNumber: user.passportNumber ?? "",
+    taxCode: user.taxCode ?? "",
+    kycStatus: user.kycStatus ?? "unverified",
+    canPostListing: user.canPostListing === true,
+    verifiedAt: user.verifiedAt ?? null,
+    verifiedBy: user.verifiedBy ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
@@ -65,6 +78,10 @@ export async function registerUser(payload) {
   const normalizedEmail = User.normalizeEmail(payload.email);
   const normalizedPhone = User.normalizePhone(payload.phone);
 
+  if (!normalizedEmail || !normalizedPhone) {
+    throw new ApiError(400, "Cần cung cấp đầy đủ email và số điện thoại.");
+  }
+
   const existingUser = await findExistingUser(payload);
 
   if (existingUser) {
@@ -94,6 +111,8 @@ export async function registerUser(payload) {
     roles,
     isActive: true,
   });
+
+  await sendWelcomeNotification(user).catch(() => null);
 
   return {
     accessToken: signAccessToken(user),
