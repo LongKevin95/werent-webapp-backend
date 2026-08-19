@@ -1,14 +1,33 @@
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const cloudinaryMocks = vi.hoisted(() => ({
   deleteAsset: vi.fn(),
   uploadFiles: vi.fn(),
 }));
 
+const notificationMocks = vi.hoisted(() => ({
+  sendWelcomeNotification: vi.fn(),
+  sendTopUpSuccessNotification: vi.fn(),
+  sendTopUpFailedNotification: vi.fn(),
+  sendAdminWalletAdjustmentNotification: vi.fn(),
+}));
+
 vi.mock("../src/services/cloudinary.service.js", () => cloudinaryMocks);
+vi.mock(
+  "../src/modules/notifications/notification.service.js",
+  () => notificationMocks,
+);
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
@@ -48,6 +67,9 @@ describe("authentication and profile backlog", () => {
         format: "png",
       },
     ]);
+    notificationMocks.sendWelcomeNotification
+      .mockReset()
+      .mockResolvedValue(null);
   });
 
   afterAll(async () => {
@@ -73,6 +95,35 @@ describe("authentication and profile backlog", () => {
 
     expect(loginResponse.status).toBe(200);
     expect(loginResponse.body.data.user.phone).toBe("0901234567");
+  });
+
+  it("triggers a welcome notification after successful registration", async () => {
+    const registerResponse = await registerUser();
+
+    expect(registerResponse.status).toBe(201);
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fullName: "Nguyễn Văn Test",
+        email: "test@example.com",
+        phone: "0901234567",
+      }),
+    );
+  });
+
+  it("keeps registration successful when Novu delivery fails", async () => {
+    notificationMocks.sendWelcomeNotification.mockRejectedValueOnce(
+      new Error("Novu is unavailable"),
+    );
+
+    const registerResponse = await registerUser({
+      email: "fallback@example.com",
+      phone: "0907654321",
+    });
+
+    expect(registerResponse.status).toBe(201);
+    expect(registerResponse.body.data.user.email).toBe("fallback@example.com");
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
   });
 
   it("requires both email and phone during registration", async () => {
@@ -169,16 +220,20 @@ describe("authentication and profile backlog", () => {
 
     expect(changeResponse.status).toBe(200);
 
-    const oldPasswordResponse = await request(app).post("/api/auth/login").send({
-      identifier: "test@example.com",
-      password: "Password123!",
-    });
+    const oldPasswordResponse = await request(app)
+      .post("/api/auth/login")
+      .send({
+        identifier: "test@example.com",
+        password: "Password123!",
+      });
     expect(oldPasswordResponse.status).toBe(401);
 
-    const newPasswordResponse = await request(app).post("/api/auth/login").send({
-      identifier: "test@example.com",
-      password: "NewPassword456!",
-    });
+    const newPasswordResponse = await request(app)
+      .post("/api/auth/login")
+      .send({
+        identifier: "test@example.com",
+        password: "NewPassword456!",
+      });
     expect(newPasswordResponse.status).toBe(200);
   });
 

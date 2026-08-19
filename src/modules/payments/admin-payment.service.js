@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import ApiError from "../../common/ApiError.js";
 import { ORDER_STATUS } from "../../common/constants.js";
+import { sendAdminWalletAdjustmentNotification } from "../notifications/notification.service.js";
 import User from "../users/user.model.js";
 import PaymentOrder from "./payment.model.js";
 import TopupPromotion from "./promotion.model.js";
@@ -9,7 +10,10 @@ import {
   calculatePromotionBonus,
   findApplicableTopupPromotion,
 } from "./topup-promotion.service.js";
-import { adjustWalletBalance, reconcileWalletTopUps } from "./wallet.service.js";
+import {
+  adjustWalletBalance,
+  reconcileWalletTopUps,
+} from "./wallet.service.js";
 
 const DEMO_TOP_UP_PROVIDER = "admin_demo";
 const DEMO_TOP_UP_PACKAGE_CODE = "ADMIN_DEMO_TOPUP";
@@ -42,7 +46,10 @@ async function reconcilePaidTopUpOrders(items) {
 
 function populateAdminTransactionQuery(query) {
   return query
-    .populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance")
+    .populate(
+      "user",
+      "fullName email phone avatarUrl walletBalance walletPromotionBalance",
+    )
     .populate("adminActor", "fullName email")
     .populate("promotion", "name code bonusPercent");
 }
@@ -56,7 +63,8 @@ async function findDemoTopUpUser(payload) {
   const user = email
     ? await User.findOne({ email })
     : await User.findById(payload.userId);
-  if (!user) throw new ApiError(404, "Không tìm thấy tài khoản với email đã nhập.");
+  if (!user)
+    throw new ApiError(404, "Không tìm thấy tài khoản với email đã nhập.");
 
   return user;
 }
@@ -110,7 +118,9 @@ export async function listAdminTransactions(query = {}) {
   }
   if (query.search) {
     const pattern = new RegExp(escapeRegExp(query.search), "i");
-    const users = await User.find({ $or: [{ fullName: pattern }, { email: pattern }, { phone: pattern }] }).select("_id");
+    const users = await User.find({
+      $or: [{ fullName: pattern }, { email: pattern }, { phone: pattern }],
+    }).select("_id");
     filter.$or = [
       { orderCode: pattern },
       { providerTransactionId: pattern },
@@ -125,7 +135,9 @@ export async function listAdminTransactions(query = {}) {
 
   let [items, total, statusCounts, totalValue] = await Promise.all([
     populateAdminTransactionQuery(PaymentOrder.find(filter))
-      .sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
     PaymentOrder.countDocuments(filter),
     PaymentOrder.aggregate([
       { $match: summaryFilter },
@@ -144,13 +156,21 @@ export async function listAdminTransactions(query = {}) {
   ]);
   await reconcilePaidTopUpOrders(items);
   if (items.length) {
-    items = await populateAdminTransactionQuery(PaymentOrder.find({ _id: { $in: items.map((item) => item._id) } }))
-      .sort({ createdAt: -1 });
+    items = await populateAdminTransactionQuery(
+      PaymentOrder.find({ _id: { $in: items.map((item) => item._id) } }),
+    ).sort({ createdAt: -1 });
   }
-  const counts = Object.fromEntries(statusCounts.map((entry) => [entry._id, entry.count]));
+  const counts = Object.fromEntries(
+    statusCounts.map((entry) => [entry._id, entry.count]),
+  );
   return {
     items,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 },
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    },
     summary: {
       total: Object.values(counts).reduce((sum, count) => sum + count, 0),
       paid: counts.paid ?? 0,
@@ -173,18 +193,27 @@ export async function getAdminTransaction(id) {
 
 export async function adjustBalance(adminId, payload) {
   assertId(payload.userId, "Không tìm thấy người dùng.");
-  const delta = payload.direction === "credit" ? payload.amount : -payload.amount;
+  const delta =
+    payload.direction === "credit" ? payload.amount : -payload.amount;
   const user = await User.findById(payload.userId);
   if (!user) throw new ApiError(404, "Không tìm thấy người dùng.");
-  const adjustment = await adjustWalletBalance(user._id, payload.direction, payload.amount, {
-    adminId: String(adminId),
-    reason: payload.reason,
-  });
+  const adjustment = await adjustWalletBalance(
+    user._id,
+    payload.direction,
+    payload.amount,
+    {
+      adminId: String(adminId),
+      reason: payload.reason,
+    },
+  );
   try {
-    return await PaymentOrder.create({
+    const item = await PaymentOrder.create({
       user: user._id,
       packageCode: "ADMIN_ADJUSTMENT",
-      packageName: payload.direction === "credit" ? "Điều chỉnh tăng số dư" : "Điều chỉnh giảm số dư",
+      packageName:
+        payload.direction === "credit"
+          ? "Điều chỉnh tăng số dư"
+          : "Điều chỉnh giảm số dư",
       amount: payload.amount,
       baseAmount: payload.amount,
       bonusAmount: 0,
@@ -201,6 +230,12 @@ export async function adjustBalance(adminId, payload) {
       confirmedAt: new Date(),
       creditedAt: new Date(),
     });
+    await sendAdminWalletAdjustmentNotification(
+      user,
+      item,
+      payload.direction,
+    ).catch(() => null);
+    return item;
   } catch (error) {
     await adjustment.transaction.deleteOne().catch(() => null);
     await reconcileWalletTopUps(user._id).catch(() => null);
@@ -212,9 +247,13 @@ export async function createDemoTopUp(adminId, payload) {
   const user = await findDemoTopUpUser(payload);
   const amount = Number(payload.amount);
   const paidAt = new Date();
-  const promotionFields = await buildLockedTopupPromotionFields(user._id, amount, {
-    referenceDate: paidAt,
-  });
+  const promotionFields = await buildLockedTopupPromotionFields(
+    user._id,
+    amount,
+    {
+      referenceDate: paidAt,
+    },
+  );
   const bonusAmount = promotionFields.bonusAmount;
   const currentTotals = await reconcileWalletTopUps(user._id);
   const balanceBefore =
@@ -257,7 +296,10 @@ export async function createDemoTopUp(adminId, payload) {
   order.balanceBefore = Math.max(balanceAfter - totalCredit, 0);
   await order.save();
 
-  return order.populate("user", "fullName email phone avatarUrl walletBalance walletPromotionBalance");
+  return order.populate(
+    "user",
+    "fullName email phone avatarUrl walletBalance walletPromotionBalance",
+  );
 }
 
 export async function getDemoTopUpQuote(payload) {
@@ -270,11 +312,17 @@ export async function getDemoTopUpQuote(payload) {
 }
 
 export function listPromotions() {
-  return TopupPromotion.find().populate("createdBy", "fullName email").sort({ createdAt: -1 });
+  return TopupPromotion.find()
+    .populate("createdBy", "fullName email")
+    .sort({ createdAt: -1 });
 }
 
 export function createPromotion(adminId, payload) {
-  return TopupPromotion.create({ ...payload, code: payload.code.toUpperCase(), createdBy: adminId });
+  return TopupPromotion.create({
+    ...payload,
+    code: payload.code.toUpperCase(),
+    createdBy: adminId,
+  });
 }
 
 export async function updatePromotion(id, payload) {
@@ -283,7 +331,8 @@ export async function updatePromotion(id, payload) {
   if (!item) throw new ApiError(404, "Không tìm thấy chương trình khuyến mãi.");
   Object.assign(item, payload);
   if (payload.code) item.code = payload.code.toUpperCase();
-  if (item.endsAt <= item.startsAt) throw new ApiError(400, "Thời gian kết thúc phải sau thời gian bắt đầu.");
+  if (item.endsAt <= item.startsAt)
+    throw new ApiError(400, "Thời gian kết thúc phải sau thời gian bắt đầu.");
   await item.save();
   return item;
 }

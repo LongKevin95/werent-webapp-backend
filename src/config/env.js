@@ -1,24 +1,59 @@
 import { z } from "zod";
 
-const optionalString = z.preprocess(
-  (value) => {
-    if (typeof value !== "string") {
-      return value;
-    }
+const optionalString = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
 
-    const trimmedValue = value.trim();
-    return trimmedValue.length > 0 ? trimmedValue : undefined;
-  },
-  z.string().trim().optional(),
-);
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 ? trimmedValue : undefined;
+}, z.string().trim().optional());
 
 const envSchema = z.object({
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  NODE_ENV: z
+    .enum(["development", "test", "production"])
+    .default("development"),
   PORT: z.coerce.number().int().positive().default(8080),
   MONGODB_URI: optionalString,
   JWT_SECRET: z.string().trim().min(1).default("werent-dev-secret"),
   JWT_EXPIRES_IN: z.string().trim().min(1).default("7d"),
   CORS_ORIGIN: optionalString,
+  NOVU_SECRET_KEY: optionalString,
+  NOVU_WELCOME_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("welcome-new-account"),
+  NOVU_LISTING_STATUS_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("listing-status-updated"),
+  NOVU_ACCOUNT_KYC_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("account-kyc-reviewed"),
+  NOVU_LISTING_VERIFICATION_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("listing-verification-reviewed"),
+  NOVU_TOPUP_SUCCESS_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("wallet-top-up-success"),
+  NOVU_TOPUP_FAILED_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("wallet-top-up-failed"),
+  NOVU_ADMIN_WALLET_ADJUSTMENT_WORKFLOW_ID: z
+    .string()
+    .trim()
+    .min(1)
+    .default("wallet-admin-adjustment"),
   CLOUDINARY_CLOUD_NAME: optionalString,
   CLOUDINARY_API_KEY: optionalString,
   CLOUDINARY_API_SECRET: optionalString,
