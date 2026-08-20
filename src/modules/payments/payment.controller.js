@@ -9,6 +9,7 @@ import {
   handleSepayWebhook,
   handleMomoIpn,
   listPackages,
+  getPaymentCapabilities,
   reconcileTopupOrder,
   confirmMomoMockTopUp,
 } from "./payment.service.js";
@@ -17,10 +18,11 @@ import { getWalletOverview } from "./wallet.service.js";
 
 export const getPackages = asyncHandler(async (req, res) => {
   const items = listPackages();
+  const capabilities = getPaymentCapabilities();
   return res.status(200).json({
     success: true,
     message: "Lấy danh sách gói thanh toán thành công.",
-    data: { items },
+    data: { items, capabilities },
   });
 });
 

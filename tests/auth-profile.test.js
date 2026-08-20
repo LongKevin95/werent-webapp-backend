@@ -97,6 +97,16 @@ describe("authentication and profile backlog", () => {
     expect(loginResponse.body.data.user.phone).toBe("0901234567");
   });
 
+  it("returns Vietnamese required-field messages for an empty login", async () => {
+    const response = await request(app).post("/api/auth/login").send({});
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Mật khẩu là bắt buộc");
+    expect(response.body.errors.fieldErrors.password).toContain(
+      "Mật khẩu là bắt buộc",
+    );
+  });
+
   it("triggers a welcome notification after successful registration", async () => {
     const registerResponse = await registerUser();
 

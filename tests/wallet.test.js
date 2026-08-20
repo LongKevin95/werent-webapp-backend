@@ -133,6 +133,12 @@ describe("wallet top-up and spending", () => {
     const registerResponse = await registerUser();
     const token = registerResponse.body.data.accessToken;
 
+    const capabilitiesResponse = await request(app).get("/api/payments/packages");
+    expect(capabilitiesResponse.body.data.capabilities.momo).toEqual({
+      enabled: true,
+      mode: "mock",
+    });
+
     const checkoutResponse = await request(app)
       .post("/api/payments/top-up/checkout")
       .set("Authorization", `Bearer ${token}`)

@@ -240,6 +240,22 @@ export function listPackages() {
   return PACKAGE_CATALOG;
 }
 
+export function getPaymentCapabilities() {
+  const mockEnabled = env.MOMO_MOCK_ENABLED && env.NODE_ENV !== "production";
+  const liveMomoConfigured = Boolean(
+    env.MOMO_PARTNER_CODE &&
+      env.MOMO_ACCESS_KEY &&
+      env.MOMO_SECRET_KEY &&
+      env.MOMO_IPN_URL,
+  );
+  return {
+    momo: {
+      enabled: mockEnabled || liveMomoConfigured,
+      mode: mockEnabled ? "mock" : liveMomoConfigured ? "sandbox" : "unavailable",
+    },
+  };
+}
+
 export async function createOrder(userId, payload) {
   const selectedPackage = getPackageByCode(payload.packageCode);
   if (!selectedPackage)
