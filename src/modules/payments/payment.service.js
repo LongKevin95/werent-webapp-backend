@@ -4,6 +4,7 @@ import env from "../../config/env.js";
 import {
   buildSepayCheckoutFields,
   buildSepayQrPayload,
+  fetchSepayTransactions,
   normalizeSepayTransaction,
   verifySepayIpnSecret,
   verifySepaySignature,
@@ -148,6 +149,10 @@ async function finalizePaidOrder(order) {
     return order;
   }
 
+  if (order.creditedAt) {
+    return order;
+  }
+
   await refreshTopupPromotionFields(order);
   await order.save();
   const totals = await creditWalletTopUp(order);
@@ -162,6 +167,73 @@ async function finalizePaidOrder(order) {
   await sendTopUpSuccessNotification(user, order).catch(() => null);
 
   return order;
+}
+
+async function findSepayTransactionByOrderCode(orderCode) {
+  const transactions = await fetchSepayTransactions({ q: orderCode });
+  const matchedTransaction = transactions.find((transaction) => {
+    const normalized = normalizeSepayTransaction(transaction);
+    return normalized.orderCode === orderCode;
+  });
+
+  return matchedTransaction
+    ? normalizeSepayTransaction(matchedTransaction)
+    : null;
+}
+
+export async function reconcileTopupOrder(userId, orderCode) {
+  const order = await PaymentOrder.findOne({ user: userId, orderCode });
+
+  if (!order) {
+    throw new ApiError(404, "Không tìm thấy đơn thanh toán.");
+  }
+
+  if (!isWalletTopUpOrder(order)) {
+    throw new ApiError(400, "Chỉ hỗ trợ đối soát cho giao dịch nạp tiền ví.");
+  }
+
+  if (order.status === ORDER_STATUS.PAID && order.creditedAt) {
+    return { order, reconciled: true, matched: false };
+  }
+
+  if (!env.SEPAY_API_TOKEN) {
+    return { order, reconciled: false, matched: false, skipped: true };
+  }
+
+  const transaction = await findSepayTransactionByOrderCode(orderCode);
+
+  if (!transaction) {
+    return { order, reconciled: false, matched: false };
+  }
+
+  if (transaction.status !== "paid") {
+    return { order, reconciled: false, matched: true };
+  }
+
+  if (Number(transaction.amount) < Number(order.amount)) {
+    throw new ApiError(400, "Số tiền nhận được không đủ cho giao dịch.");
+  }
+
+  const paidAt = new Date();
+  const claimedOrder = await PaymentOrder.findOneAndUpdate(
+    { _id: order._id, status: { $ne: ORDER_STATUS.PAID } },
+    {
+      $set: {
+        status: ORDER_STATUS.PAID,
+        paidAt,
+        confirmedAt: paidAt,
+        providerTransactionId: transaction.transactionId,
+        rawWebhookPayload: transaction.rawPayload,
+      },
+    },
+    { returnDocument: "after" },
+  );
+
+  const finalizedOrder = await finalizePaidOrder(
+    claimedOrder ?? (await PaymentOrder.findById(order._id)),
+  );
+
+  return { order: finalizedOrder, reconciled: true, matched: true };
 }
 
 export function listPackages() {

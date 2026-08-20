@@ -72,6 +72,12 @@ const envSchema = z.object({
   SEPAY_MERCHANT_ID: optionalString,
   SEPAY_SECRET_KEY: optionalString,
   SEPAY_IPN_SECRET: optionalString,
+  SEPAY_API_TOKEN: optionalString,
+  SEPAY_API_BASE_URL: z
+    .string()
+    .trim()
+    .url()
+    .default("https://userapi.sepay.vn/v2"),
   SEPAY_CURRENCY: z.string().trim().min(1).default("VND"),
   SEPAY_CHECKOUT_URL: z
     .string()

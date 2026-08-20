@@ -28,6 +28,8 @@ process.env.JWT_SECRET = "payment-test-secret";
 process.env.SEPAY_WEBHOOK_SECRET = "";
 process.env.SEPAY_MERCHANT_ID = "TEST_MERCHANT";
 process.env.SEPAY_SECRET_KEY = "test-sepay-secret";
+process.env.SEPAY_API_TOKEN = "test-sepay-api-token";
+process.env.SEPAY_API_BASE_URL = "https://userapi.sepay.vn/v2";
 
 const { default: app } = await import("../src/app.js");
 const { signAccessToken } = await import("../src/modules/auth/auth.service.js");
@@ -49,6 +51,7 @@ describe("admin top-up management", () => {
   }, 60_000);
   beforeEach(async () => {
     await mongoose.connection.db.dropDatabase();
+    vi.stubGlobal("fetch", vi.fn());
     notificationMocks.sendTopUpSuccessNotification
       .mockReset()
       .mockResolvedValue(null);
@@ -73,6 +76,7 @@ describe("admin top-up management", () => {
     userToken = signAccessToken(user);
   });
   afterAll(async () => {
+    vi.unstubAllGlobals();
     await mongoose.disconnect();
     await mongoServer?.stop();
   });
@@ -151,6 +155,65 @@ describe("admin top-up management", () => {
       balanceBefore: 0,
       balanceAfter: 110000,
     });
+  });
+
+  it("reconciles a pending top-up from SePay and notifies only once", async () => {
+    const order = await request(app)
+      .post("/api/payments/topups")
+      .set("Authorization", `Bearer ${userToken}`)
+      .send({ amount: 100000, provider: "sepay" });
+
+    expect(order.status).toBe(201);
+
+    const fetchMock = vi.mocked(global.fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: "success",
+          data: [
+            {
+              id: "sepay-transaction-1",
+              code: order.body.data.order.orderCode,
+              content: order.body.data.order.orderCode,
+              transferType: "in",
+              amount_in: 100000,
+              amount_out: 0,
+              webhook_success: 0,
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const reconcile = await request(app)
+      .post("/api/payments/top-up/reconcile")
+      .set("Authorization", `Bearer ${userToken}`)
+      .send({ orderCode: order.body.data.order.orderCode });
+
+    expect(reconcile.status).toBe(200);
+    expect(
+      notificationMocks.sendTopUpSuccessNotification,
+    ).toHaveBeenCalledOnce();
+    expect(notificationMocks.sendTopUpSuccessNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: "topup@example.com",
+      }),
+      expect.objectContaining({
+        orderCode: order.body.data.order.orderCode,
+        amount: 100000,
+        totalCredit: 100000,
+      }),
+    );
+
+    const refreshedOrder = await PaymentOrder.findById(
+      order.body.data.order._id,
+    );
+    expect(refreshedOrder.status).toBe("paid");
+    expect(refreshedOrder.creditedAt).toEqual(expect.any(Date));
+
+    const refreshedUser = await User.findById(user._id);
+    expect(refreshedUser.walletBalance).toBe(100000);
   });
 
   it("marks a top-up as failed via webhook and notifies only once", async () => {
