@@ -241,7 +241,9 @@ export function listPackages() {
 }
 
 export function getPaymentCapabilities() {
-  const mockEnabled = env.MOMO_MOCK_ENABLED && env.NODE_ENV !== "production";
+  const mockEnabled =
+    env.MOMO_MOCK_ENABLED &&
+    (env.NODE_ENV !== "production" || env.MOMO_MOCK_ALLOW_PRODUCTION);
   const liveMomoConfigured = Boolean(
     env.MOMO_PARTNER_CODE &&
       env.MOMO_ACCESS_KEY &&
@@ -281,6 +283,9 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
   const topupFields = await buildTopupFields(user._id, payload.amount, {
     promotionIds: payload.promotionIds,
   });
+  const mockMomoEnabled =
+    env.MOMO_MOCK_ENABLED &&
+    (env.NODE_ENV !== "production" || env.MOMO_MOCK_ALLOW_PRODUCTION);
   const order = await PaymentOrder.create({
     ...topupFields,
     user: user._id,
@@ -291,7 +296,7 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
     paymentMethod: payload.paymentMethod === "momo" ? "MOMO" : "BANK_TRANSFER",
     provider:
       payload.paymentMethod === "momo"
-        ? env.MOMO_MOCK_ENABLED && env.NODE_ENV !== "production"
+        ? mockMomoEnabled
           ? "momo_mock"
           : "momo"
         : "sepay",
@@ -299,7 +304,7 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
   });
   const callbackUrls = buildWalletCallbackUrls(options.origin, order.orderCode);
   if (payload.paymentMethod === "momo") {
-    if (env.MOMO_MOCK_ENABLED && env.NODE_ENV !== "production") {
+    if (mockMomoEnabled) {
       const mockUrl = new URL("/wallet/top-up/momo-mock", callbackUrls.successUrl);
       mockUrl.searchParams.set("orderCode", order.orderCode);
       return {
@@ -348,7 +353,10 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
 }
 
 export async function confirmMomoMockTopUp(userId, orderCode) {
-  if (!env.MOMO_MOCK_ENABLED || env.NODE_ENV === "production") {
+  const mockMomoEnabled =
+    env.MOMO_MOCK_ENABLED &&
+    (env.NODE_ENV !== "production" || env.MOMO_MOCK_ALLOW_PRODUCTION);
+  if (!mockMomoEnabled) {
     throw new ApiError(404, "Thanh toán MoMo mô phỏng không được bật.");
   }
 
