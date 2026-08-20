@@ -15,6 +15,7 @@ import {
   sepayIpn,
   sepayWebhook,
   momoIpn,
+  confirmMomoMockPayment,
 } from "./payment.controller.js";
 import {
   createPaymentOrderSchema,
@@ -48,6 +49,12 @@ router.post(
   requireAuth,
   validate(reconcileTopupOrderSchema),
   reconcileTopUpOrder,
+);
+router.post(
+  "/top-up/momo-mock/confirm",
+  requireAuth,
+  validate(reconcileTopupOrderSchema),
+  confirmMomoMockPayment,
 );
 router.post(
   "/topups",

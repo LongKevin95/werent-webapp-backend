@@ -95,6 +95,10 @@ const envSchema = z.object({
   MOMO_ENDPOINT: z.string().trim().url().default("https://test-payment.momo.vn/v2/gateway/api/create"),
   MOMO_IPN_URL: optionalString,
   MOMO_REDIRECT_URL: optionalString,
+  MOMO_MOCK_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 });
 
 const parsedEnvironment = envSchema.safeParse(process.env);

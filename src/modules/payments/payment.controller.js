@@ -10,6 +10,7 @@ import {
   handleMomoIpn,
   listPackages,
   reconcileTopupOrder,
+  confirmMomoMockTopUp,
 } from "./payment.service.js";
 import { listCurrentTopupPromotions } from "./topup-promotion.service.js";
 import { getWalletOverview } from "./wallet.service.js";
@@ -81,6 +82,15 @@ export const reconcileTopUpOrder = asyncHandler(async (req, res) => {
     success: true,
     message: "Đối soát trạng thái nạp tiền thành công.",
     data,
+  });
+});
+
+export const confirmMomoMockPayment = asyncHandler(async (req, res) => {
+  const order = await confirmMomoMockTopUp(req.user._id, req.body.orderCode);
+  return res.status(200).json({
+    success: true,
+    message: "Mô phỏng thanh toán MoMo thành công.",
+    data: { order },
   });
 });
 

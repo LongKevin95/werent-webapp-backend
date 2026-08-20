@@ -273,11 +273,29 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
     orderCode,
     note,
     paymentMethod: payload.paymentMethod === "momo" ? "MOMO" : "BANK_TRANSFER",
-    provider: payload.paymentMethod === "momo" ? "momo" : "sepay",
+    provider:
+      payload.paymentMethod === "momo"
+        ? env.MOMO_MOCK_ENABLED && env.NODE_ENV !== "production"
+          ? "momo_mock"
+          : "momo"
+        : "sepay",
     expiresAt: createPaymentExpiryDate(),
   });
   const callbackUrls = buildWalletCallbackUrls(options.origin, order.orderCode);
   if (payload.paymentMethod === "momo") {
+    if (env.MOMO_MOCK_ENABLED && env.NODE_ENV !== "production") {
+      const mockUrl = new URL("/wallet/top-up/momo-mock", callbackUrls.successUrl);
+      mockUrl.searchParams.set("orderCode", order.orderCode);
+      return {
+        order,
+        checkout: {
+          method: "MOMO_MOCK",
+          redirectUrl: mockUrl.toString(),
+          qrData: mockUrl.toString(),
+          expiresAt: order.expiresAt,
+        },
+      };
+    }
     try {
       const momo = await createMomoPayment({
         amount: order.amount,
@@ -311,6 +329,53 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
       expiresAt: order.expiresAt,
     },
   };
+}
+
+export async function confirmMomoMockTopUp(userId, orderCode) {
+  if (!env.MOMO_MOCK_ENABLED || env.NODE_ENV === "production") {
+    throw new ApiError(404, "Thanh toán MoMo mô phỏng không được bật.");
+  }
+
+  const order = await PaymentOrder.findOne({
+    user: userId,
+    orderCode,
+    provider: "momo_mock",
+  });
+  if (!order) throw new ApiError(404, "Không tìm thấy giao dịch MoMo mô phỏng.");
+  if (order.expiresAt && order.expiresAt < new Date()) {
+    if (order.status !== ORDER_STATUS.PAID) {
+      order.status = ORDER_STATUS.CANCELED;
+      await order.save();
+    }
+    throw new ApiError(410, "Giao dịch mô phỏng đã hết hạn.");
+  }
+  if (order.status === ORDER_STATUS.PAID && order.creditedAt) return order;
+  if (order.status !== ORDER_STATUS.PENDING) {
+    throw new ApiError(409, "Giao dịch mô phỏng không còn ở trạng thái chờ.");
+  }
+
+  const paidAt = new Date();
+  const claimedOrder = await PaymentOrder.findOneAndUpdate(
+    { _id: order._id, status: ORDER_STATUS.PENDING },
+    {
+      $set: {
+        status: ORDER_STATUS.PAID,
+        paidAt,
+        confirmedAt: paidAt,
+        providerTransactionId: `MOMO-MOCK-${order.orderCode}`,
+        rawWebhookPayload: { mock: true, resultCode: 0 },
+      },
+    },
+    { returnDocument: "after" },
+  );
+  if (!claimedOrder) {
+    const currentOrder = await PaymentOrder.findById(order._id);
+    if (currentOrder?.status === ORDER_STATUS.PAID && currentOrder.creditedAt) {
+      return currentOrder;
+    }
+    throw new ApiError(409, "Giao dịch mô phỏng đang được xử lý.");
+  }
+  return finalizePaidOrder(claimedOrder);
 }
 
 export async function handleMomoIpn(payload) {
