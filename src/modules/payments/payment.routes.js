@@ -13,12 +13,14 @@ import {
   getPaymentQr,
   sepayIpn,
   sepayWebhook,
+  momoIpn,
 } from "./payment.controller.js";
 import {
   createPaymentOrderSchema,
   createTopupOrderSchema,
   createWalletTopUpCheckoutSchema,
   sepayWebhookSchema,
+  momoIpnSchema,
 } from "./payment.schema.js";
 
 const router = Router();
@@ -33,5 +35,6 @@ router.post("/topups", requireAuth, validate(createTopupOrderSchema), createTopu
 router.get("/orders/:orderId/qr", requireAuth, getPaymentQr);
 router.post("/webhook/sepay", webhookRateLimit, validate(sepayWebhookSchema), sepayWebhook);
 router.post("/ipn/sepay", webhookRateLimit, validate(sepayWebhookSchema), sepayIpn);
+router.post("/ipn/momo", webhookRateLimit, validate(momoIpnSchema), momoIpn);
 
 export default router;

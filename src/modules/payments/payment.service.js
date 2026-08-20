@@ -19,6 +19,7 @@ import {
   refreshTopupPromotionFields,
 } from "./topup-promotion.service.js";
 import { creditWalletTopUp } from "./wallet.service.js";
+import { createMomoPayment, verifyMomoIpn } from "../../services/momo.service.js";
 
 const PACKAGE_CATALOG = Object.freeze([
   { code: "basic_7d", name: "Gói Basic 7 ngày", amount: 49_000 },
@@ -199,11 +200,28 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
     packageName: "Nạp tiền ví WeRent",
     orderCode,
     note,
-    paymentMethod: "BANK_TRANSFER",
-    provider: "sepay",
+    paymentMethod: payload.paymentMethod === "momo" ? "MOMO" : "BANK_TRANSFER",
+    provider: payload.paymentMethod === "momo" ? "momo" : "sepay",
     expiresAt: createPaymentExpiryDate(),
   });
   const callbackUrls = buildWalletCallbackUrls(options.origin, order.orderCode);
+  if (payload.paymentMethod === "momo") {
+    try {
+      const momo = await createMomoPayment({
+        amount: order.amount,
+        orderId: order.orderCode,
+        orderInfo: note || `Nap tien vi WeRent ${order.orderCode}`,
+        redirectUrl: callbackUrls.successUrl,
+      });
+      order.providerOrderId = momo.requestId;
+      await order.save();
+      return { order, checkout: { method: "REDIRECT", redirectUrl: momo.payUrl, deeplink: momo.deeplink, qrCodeUrl: momo.qrCodeUrl, expiresAt: order.expiresAt } };
+    } catch (error) {
+      order.status = ORDER_STATUS.FAILED;
+      await order.save();
+      throw error;
+    }
+  }
   const checkoutFields = buildSepayCheckoutFields({
     amount: order.amount,
     customerId: String(user._id),
@@ -221,6 +239,29 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
       expiresAt: order.expiresAt,
     },
   };
+}
+
+export async function handleMomoIpn(payload) {
+  if (!verifyMomoIpn(payload)) throw new ApiError(401, "Chữ ký IPN MoMo không hợp lệ.");
+  const order = await PaymentOrder.findOne({ orderCode: payload.orderId, provider: "momo" });
+  if (!order) throw new ApiError(404, "Không tìm thấy đơn thanh toán MoMo.");
+  if (String(payload.partnerCode) !== String(env.MOMO_PARTNER_CODE) || Number(payload.amount) !== Number(order.amount)) {
+    throw new ApiError(400, "Thông tin giao dịch MoMo không khớp với đơn hàng.");
+  }
+  await assertUniqueProviderTransaction(order, payload.transId);
+  order.providerTransactionId = payload.transId ? String(payload.transId) : order.providerTransactionId;
+  order.rawWebhookPayload = payload;
+  if (Number(payload.resultCode) !== 0) {
+    if (order.status !== ORDER_STATUS.PAID) order.status = ORDER_STATUS.FAILED;
+    await order.save();
+    return order;
+  }
+  if (order.status === ORDER_STATUS.PAID && order.creditedAt) return order;
+  order.status = ORDER_STATUS.PAID;
+  order.paidAt = order.paidAt ?? new Date();
+  order.confirmedAt = order.confirmedAt ?? order.paidAt;
+  await order.save();
+  return finalizePaidOrder(order);
 }
 
 export async function createTopupOrder(userId, payload) {

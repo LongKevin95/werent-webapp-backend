@@ -7,6 +7,7 @@ import {
   getPaymentHistory,
   handleSepayIpn,
   handleSepayWebhook,
+  handleMomoIpn,
   listPackages,
 } from "./payment.service.js";
 import { listCurrentTopupPromotions } from "./topup-promotion.service.js";
@@ -62,4 +63,9 @@ export const sepayIpn = asyncHandler(async (req, res) => {
   const secret = req.headers["x-secret-key"] ?? "";
   const order = await handleSepayIpn(req.body, String(secret));
   return res.status(200).json({ success: true, message: "Xử lý IPN SePay thành công.", data: { order } });
+});
+
+export const momoIpn = asyncHandler(async (req, res) => {
+  await handleMomoIpn(req.body);
+  return res.status(204).send();
 });

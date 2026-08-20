@@ -108,20 +108,20 @@ function buildListingStatusNotification(property) {
   if (property.status === PROPERTY_STATUS.ACTIVE) {
     return {
       subject: "Tin đăng đã được duyệt",
-      body: `Tin đăng \"${property.title}\" đã được duyệt và đang hiển thị trên WeRent.`,
+      body: `Tin đăng "${property.title}" đã được duyệt và đang hiển thị trên WeRent.`,
     };
   }
 
   if (property.status === PROPERTY_STATUS.REJECTED) {
     return {
       subject: "Tin đăng bị từ chối",
-      body: `Tin đăng \"${property.title}\" đã bị từ chối. Lý do: ${property.rejectionReason ?? property.moderationReason ?? "Không có"}`,
+      body: `Tin đăng "${property.title}" đã bị từ chối. Lý do: ${property.rejectionReason ?? property.moderationReason ?? "Không có"}`,
     };
   }
 
   return {
     subject: "Tin đăng bị ẩn",
-    body: `Tin đăng \"${property.title}\" đã bị ẩn. Lý do: ${property.moderationReason ?? "Không có"}`,
+    body: `Tin đăng "${property.title}" đã bị ẩn. Lý do: ${property.moderationReason ?? "Không có"}`,
   };
 }
 

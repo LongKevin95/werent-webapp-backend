@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node src/server.js",
+    "lint": "eslint .",
     "seed:test-users": "node --env-file=.env src/scripts/seed-test-users.js",
     "seed:search-properties": "node --env-file=.env src/scripts/seed-search-properties.js",
     "seed:administrative-divisions": "node --env-file=.env src/scripts/seed-administrative-divisions.js",

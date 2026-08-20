@@ -83,6 +83,12 @@ const envSchema = z.object({
   SEPAY_BANK_BIN: optionalString,
   SEPAY_BANK_ACCOUNT: optionalString,
   SEPAY_BANK_ACCOUNT_NAME: optionalString,
+  MOMO_PARTNER_CODE: optionalString,
+  MOMO_ACCESS_KEY: optionalString,
+  MOMO_SECRET_KEY: optionalString,
+  MOMO_ENDPOINT: z.string().trim().url().default("https://test-payment.momo.vn/v2/gateway/api/create"),
+  MOMO_IPN_URL: optionalString,
+  MOMO_REDIRECT_URL: optionalString,
 });
 
 const parsedEnvironment = envSchema.safeParse(process.env);

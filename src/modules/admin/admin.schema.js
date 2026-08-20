@@ -101,7 +101,7 @@ export const createAdminUserSchema = z
     isActive: z.boolean().default(true),
   })
   .superRefine((data, context) =>
-    validateContactFields(data, context, { requireBoth: true }),
+    validateContactFields(data, context, { requireContact: true }),
   );
 
 export const updateAdminUserSchema = z
