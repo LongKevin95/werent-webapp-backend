@@ -68,10 +68,35 @@ export async function submitAccountKyc(userId, payload, files = {}) {
   if (pending) throw new ApiError(409, "Bạn đang có một hồ sơ chờ duyệt.");
 
   const requiredFiles = [
-    { kind: "identity_front", file: files.identityFront?.[0] },
-    { kind: "identity_back", file: files.identityBack?.[0] },
-    { kind: "selfie", file: files.selfie?.[0] },
+    {
+      kind: "identity_front",
+      file: files.identityFront?.[0],
+      missingMessage: "Vui lòng tải ảnh CCCD mặt trước.",
+      invalidMessage: "Ảnh CCCD mặt trước phải là JPG, PNG hoặc WEBP.",
+    },
+    {
+      kind: "identity_back",
+      file: files.identityBack?.[0],
+      missingMessage: "Vui lòng tải ảnh CCCD mặt sau.",
+      invalidMessage: "Ảnh CCCD mặt sau phải là JPG, PNG hoặc WEBP.",
+    },
+    {
+      kind: "selfie",
+      file: files.selfie?.[0],
+      missingMessage: "Vui lòng tải ảnh selfie.",
+      invalidMessage: "Ảnh selfie phải là JPG, PNG hoặc WEBP.",
+    },
   ];
+  const missingFile = requiredFiles.find((entry) => !entry.file);
+  if (missingFile) {
+    throw new ApiError(400, missingFile.missingMessage);
+  }
+  const invalidFile = requiredFiles.find(
+    (entry) => !entry.file.mimetype?.startsWith("image/"),
+  );
+  if (invalidFile) {
+    throw new ApiError(415, invalidFile.invalidMessage);
+  }
   if (requiredFiles.some((entry) => !entry.file)) {
     throw new ApiError(
       400,
@@ -88,7 +113,7 @@ export async function submitAccountKyc(userId, payload, files = {}) {
   }
 
   const email = user.email;
-  const phone = normalizeVietnamPhone(user.phone);
+  const phone = normalizeVietnamPhone(payload.phone ?? user.phone);
   if (!email || !phone) {
     throw new ApiError(
       400,
@@ -131,6 +156,7 @@ export async function submitAccountKyc(userId, payload, files = {}) {
     });
     user.kycStatus = KYC_STATUS.PENDING;
     user.canPostListing = false;
+    user.phone = phone;
     await user.save();
     return request;
   } catch (error) {

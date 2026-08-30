@@ -28,6 +28,8 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().trim().min(1).default("7d"),
   CORS_ORIGIN: optionalString,
   APP_BASE_URL: optionalUrl,
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_AUTH_ALLOWED_EMAILS: optionalString,
   NOVU_SECRET_KEY: optionalString,
   NOVU_WELCOME_WORKFLOW_ID: z
     .string()

@@ -45,8 +45,14 @@ const userSchema = new mongoose.Schema(
     },
     passwordHash: {
       type: String,
-      required: [true, "Password hash is required"],
       select: false,
+    },
+    googleId: {
+      type: String,
+      trim: true,
+      unique: true,
+      sparse: true,
+      index: true,
     },
     roles: {
       type: [String],
@@ -116,12 +122,20 @@ userSchema.pre("validate", function normalizeFields() {
     this.phone = normalizePhone(this.phone);
   }
 
+  if (this.googleId && typeof this.googleId === "string") {
+    this.googleId = this.googleId.trim() || undefined;
+  }
+
   if (!this.roles || this.roles.length === 0) {
     this.roles = [ROLES.USER];
   }
 });
 
 userSchema.methods.comparePassword = function comparePassword(password) {
+  if (!this.passwordHash) {
+    return false;
+  }
+
   return bcrypt.compare(password, this.passwordHash);
 };
 

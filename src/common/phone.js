@@ -31,6 +31,44 @@ const SUPPORTED_VIETNAM_MOBILE_PREFIXES = Object.freeze([
 
 export const INVALID_PHONE_MESSAGE = "Số điện thoại không hợp lệ. Vui lòng kiểm tra lại.";
 
+export function getVietnamPhoneValidationError(phone) {
+  if (typeof phone !== "string" && typeof phone !== "number") {
+    return "Vui lòng nhập số điện thoại.";
+  }
+
+  const rawPhone = String(phone).trim();
+
+  if (!rawPhone) {
+    return "Vui lòng nhập số điện thoại.";
+  }
+
+  if (!/^\+?\d+$/.test(rawPhone)) {
+    return "Số điện thoại chỉ được gồm chữ số và có thể bắt đầu bằng +84.";
+  }
+
+  let digits = rawPhone.startsWith("+") ? rawPhone.slice(1) : rawPhone;
+
+  if (digits.startsWith("84")) {
+    digits = `0${digits.slice(2)}`;
+  } else if (!digits.startsWith("0") && digits.length === 9) {
+    digits = `0${digits}`;
+  }
+
+  if (digits.length < 9 || digits.length > 10) {
+    return "Số điện thoại phải có 9 hoặc 10 chữ số.";
+  }
+
+  if (!digits.startsWith("0") || digits.length !== 10) {
+    return "Số điện thoại phải bắt đầu bằng 0 hoặc dùng định dạng +84.";
+  }
+
+  if (!SUPPORTED_VIETNAM_MOBILE_PREFIXES.includes(digits.slice(0, 3))) {
+    return "Vui lòng nhập đúng đầu số nhà mạng Việt Nam.";
+  }
+
+  return "";
+}
+
 export function normalizeVietnamPhone(phone) {
   if (typeof phone !== "string" && typeof phone !== "number") {
     return undefined;
