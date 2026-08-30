@@ -225,6 +225,48 @@ describe("KYC account and listing verification", () => {
     ).toBe(2);
   });
 
+  it("accepts account KYC phone input for Google users without a saved phone", async () => {
+    const user = await User.create({
+      fullName: "Google KYC User",
+      email: "google-kyc@example.com",
+      googleId: "google-kyc-sub",
+    });
+    const token = signAccessToken(user);
+
+    const submit = await request(app)
+      .post("/api/kyc/account")
+      .set("Authorization", `Bearer ${token}`)
+      .field("fullName", "Google KYC User")
+      .field("dateOfBirth", "1994-02-03")
+      .field("email", "google-kyc@example.com")
+      .field("phone", "+84901234567")
+      .field("identityNumber", "079094001234")
+      .field("identityIssuedAt", "2021-03-04")
+      .attach("identityFront", Buffer.from("front"), {
+        filename: "front.png",
+        contentType: "image/png",
+      })
+      .attach("identityBack", Buffer.from("back"), {
+        filename: "back.png",
+        contentType: "image/png",
+      })
+      .attach("selfie", Buffer.from("selfie"), {
+        filename: "selfie.png",
+        contentType: "image/png",
+      });
+
+    expect(submit.status).toBe(201);
+    expect(submit.body.data.item).toMatchObject({
+      email: "google-kyc@example.com",
+      phone: "0901234567",
+      status: "pending",
+    });
+
+    const updatedUser = await User.findById(user._id);
+    expect(updatedUser.phone).toBe("0901234567");
+    expect(updatedUser.kycStatus).toBe("pending");
+  });
+
   it("revokes posting permission when verified identity data changes", async () => {
     const user = await User.create({
       fullName: "Người Đã Xác Thực",

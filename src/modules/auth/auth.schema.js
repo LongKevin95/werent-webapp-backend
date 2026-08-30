@@ -75,3 +75,7 @@ export const registerSchema = z
       });
     }
   });
+
+export const googleAuthSchema = z.object({
+  credential: z.string().trim().min(1, "Google credential là bắt buộc."),
+});
