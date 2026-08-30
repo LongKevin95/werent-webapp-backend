@@ -1,5 +1,10 @@
 import asyncHandler from "../../common/asyncHandler.js";
-import { loginUser, registerUser, serializeUser } from "./auth.service.js";
+import {
+  loginWithGoogle,
+  loginUser,
+  registerUser,
+  serializeUser,
+} from "./auth.service.js";
 
 export const register = asyncHandler(async (req, res) => {
   const data = await registerUser(req.body);
@@ -17,6 +22,16 @@ export const login = asyncHandler(async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Đăng nhập thành công.",
+    data,
+  });
+});
+
+export const googleLogin = asyncHandler(async (req, res) => {
+  const data = await loginWithGoogle(req.body);
+
+  return res.status(200).json({
+    success: true,
+    message: "Đăng nhập Google thành công.",
     data,
   });
 });

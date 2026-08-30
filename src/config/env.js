@@ -28,6 +28,8 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().trim().min(1).default("7d"),
   CORS_ORIGIN: optionalString,
   APP_BASE_URL: optionalUrl,
+  GOOGLE_CLIENT_ID: optionalString,
+  GOOGLE_AUTH_ALLOWED_EMAILS: optionalString,
   NOVU_SECRET_KEY: optionalString,
   NOVU_WELCOME_WORKFLOW_ID: z
     .string()
@@ -72,6 +74,12 @@ const envSchema = z.object({
   SEPAY_MERCHANT_ID: optionalString,
   SEPAY_SECRET_KEY: optionalString,
   SEPAY_IPN_SECRET: optionalString,
+  SEPAY_API_TOKEN: optionalString,
+  SEPAY_API_BASE_URL: z
+    .string()
+    .trim()
+    .url()
+    .default("https://userapi.sepay.vn/v2"),
   SEPAY_CURRENCY: z.string().trim().min(1).default("VND"),
   SEPAY_CHECKOUT_URL: z
     .string()
@@ -83,6 +91,20 @@ const envSchema = z.object({
   SEPAY_BANK_BIN: optionalString,
   SEPAY_BANK_ACCOUNT: optionalString,
   SEPAY_BANK_ACCOUNT_NAME: optionalString,
+  MOMO_PARTNER_CODE: optionalString,
+  MOMO_ACCESS_KEY: optionalString,
+  MOMO_SECRET_KEY: optionalString,
+  MOMO_ENDPOINT: z.string().trim().url().default("https://test-payment.momo.vn/v2/gateway/api/create"),
+  MOMO_IPN_URL: optionalString,
+  MOMO_REDIRECT_URL: optionalString,
+  MOMO_MOCK_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  MOMO_MOCK_ALLOW_PRODUCTION: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
 });
 
 const parsedEnvironment = envSchema.safeParse(process.env);

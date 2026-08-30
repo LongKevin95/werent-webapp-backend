@@ -4,6 +4,7 @@ import env from "../../config/env.js";
 import {
   buildSepayCheckoutFields,
   buildSepayQrPayload,
+  fetchSepayTransactions,
   normalizeSepayTransaction,
   verifySepayIpnSecret,
   verifySepaySignature,
@@ -19,6 +20,7 @@ import {
   refreshTopupPromotionFields,
 } from "./topup-promotion.service.js";
 import { creditWalletTopUp } from "./wallet.service.js";
+import { createMomoPayment, verifyMomoIpn } from "../../services/momo.service.js";
 
 const PACKAGE_CATALOG = Object.freeze([
   { code: "basic_7d", name: "Gói Basic 7 ngày", amount: 49_000 },
@@ -147,6 +149,10 @@ async function finalizePaidOrder(order) {
     return order;
   }
 
+  if (order.creditedAt) {
+    return order;
+  }
+
   await refreshTopupPromotionFields(order);
   await order.save();
   const totals = await creditWalletTopUp(order);
@@ -163,8 +169,93 @@ async function finalizePaidOrder(order) {
   return order;
 }
 
+async function findSepayTransactionByOrderCode(orderCode) {
+  const transactions = await fetchSepayTransactions({ q: orderCode });
+  const matchedTransaction = transactions.find((transaction) => {
+    const normalized = normalizeSepayTransaction(transaction);
+    return normalized.orderCode === orderCode;
+  });
+
+  return matchedTransaction
+    ? normalizeSepayTransaction(matchedTransaction)
+    : null;
+}
+
+export async function reconcileTopupOrder(userId, orderCode) {
+  const order = await PaymentOrder.findOne({ user: userId, orderCode });
+
+  if (!order) {
+    throw new ApiError(404, "Không tìm thấy đơn thanh toán.");
+  }
+
+  if (!isWalletTopUpOrder(order)) {
+    throw new ApiError(400, "Chỉ hỗ trợ đối soát cho giao dịch nạp tiền ví.");
+  }
+
+  if (order.status === ORDER_STATUS.PAID && order.creditedAt) {
+    return { order, reconciled: true, matched: false };
+  }
+
+  if (!env.SEPAY_API_TOKEN) {
+    return { order, reconciled: false, matched: false, skipped: true };
+  }
+
+  const transaction = await findSepayTransactionByOrderCode(orderCode);
+
+  if (!transaction) {
+    return { order, reconciled: false, matched: false };
+  }
+
+  if (transaction.status !== "paid") {
+    return { order, reconciled: false, matched: true };
+  }
+
+  if (Number(transaction.amount) < Number(order.amount)) {
+    throw new ApiError(400, "Số tiền nhận được không đủ cho giao dịch.");
+  }
+
+  const paidAt = new Date();
+  const claimedOrder = await PaymentOrder.findOneAndUpdate(
+    { _id: order._id, status: { $ne: ORDER_STATUS.PAID } },
+    {
+      $set: {
+        status: ORDER_STATUS.PAID,
+        paidAt,
+        confirmedAt: paidAt,
+        providerTransactionId: transaction.transactionId,
+        rawWebhookPayload: transaction.rawPayload,
+      },
+    },
+    { returnDocument: "after" },
+  );
+
+  const finalizedOrder = await finalizePaidOrder(
+    claimedOrder ?? (await PaymentOrder.findById(order._id)),
+  );
+
+  return { order: finalizedOrder, reconciled: true, matched: true };
+}
+
 export function listPackages() {
   return PACKAGE_CATALOG;
+}
+
+export function getPaymentCapabilities() {
+  const mockEnabled =
+    env.MOMO_MOCK_ENABLED &&
+    (env.NODE_ENV !== "production" || env.MOMO_MOCK_ALLOW_PRODUCTION);
+  const liveMomoConfigured = Boolean(
+    env.MOMO_PARTNER_CODE &&
+      env.MOMO_ACCESS_KEY &&
+      env.MOMO_SECRET_KEY &&
+      env.MOMO_IPN_URL,
+  );
+  return {
+    momo: {
+      enabled: mockEnabled || liveMomoConfigured,
+      mode: mockEnabled ? "mock" : liveMomoConfigured ? "sandbox" : "unavailable",
+    },
+  };
 }
 
 export async function createOrder(userId, payload) {
@@ -192,6 +283,9 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
   const topupFields = await buildTopupFields(user._id, payload.amount, {
     promotionIds: payload.promotionIds,
   });
+  const mockMomoEnabled =
+    env.MOMO_MOCK_ENABLED &&
+    (env.NODE_ENV !== "production" || env.MOMO_MOCK_ALLOW_PRODUCTION);
   const order = await PaymentOrder.create({
     ...topupFields,
     user: user._id,
@@ -199,11 +293,46 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
     packageName: "Nạp tiền ví WeRent",
     orderCode,
     note,
-    paymentMethod: "BANK_TRANSFER",
-    provider: "sepay",
+    paymentMethod: payload.paymentMethod === "momo" ? "MOMO" : "BANK_TRANSFER",
+    provider:
+      payload.paymentMethod === "momo"
+        ? mockMomoEnabled
+          ? "momo_mock"
+          : "momo"
+        : "sepay",
     expiresAt: createPaymentExpiryDate(),
   });
   const callbackUrls = buildWalletCallbackUrls(options.origin, order.orderCode);
+  if (payload.paymentMethod === "momo") {
+    if (mockMomoEnabled) {
+      const mockUrl = new URL("/wallet/top-up/momo-mock", callbackUrls.successUrl);
+      mockUrl.searchParams.set("orderCode", order.orderCode);
+      return {
+        order,
+        checkout: {
+          method: "MOMO_MOCK",
+          redirectUrl: mockUrl.toString(),
+          qrData: mockUrl.toString(),
+          expiresAt: order.expiresAt,
+        },
+      };
+    }
+    try {
+      const momo = await createMomoPayment({
+        amount: order.amount,
+        orderId: order.orderCode,
+        orderInfo: note || `Nap tien vi WeRent ${order.orderCode}`,
+        redirectUrl: callbackUrls.successUrl,
+      });
+      order.providerOrderId = momo.requestId;
+      await order.save();
+      return { order, checkout: { method: "REDIRECT", redirectUrl: momo.payUrl, deeplink: momo.deeplink, qrCodeUrl: momo.qrCodeUrl, expiresAt: order.expiresAt } };
+    } catch (error) {
+      order.status = ORDER_STATUS.FAILED;
+      await order.save();
+      throw error;
+    }
+  }
   const checkoutFields = buildSepayCheckoutFields({
     amount: order.amount,
     customerId: String(user._id),
@@ -221,6 +350,79 @@ export async function createWalletTopUpCheckout(user, payload, options = {}) {
       expiresAt: order.expiresAt,
     },
   };
+}
+
+export async function confirmMomoMockTopUp(userId, orderCode) {
+  const mockMomoEnabled =
+    env.MOMO_MOCK_ENABLED &&
+    (env.NODE_ENV !== "production" || env.MOMO_MOCK_ALLOW_PRODUCTION);
+  if (!mockMomoEnabled) {
+    throw new ApiError(404, "Thanh toán MoMo mô phỏng không được bật.");
+  }
+
+  const order = await PaymentOrder.findOne({
+    user: userId,
+    orderCode,
+    provider: "momo_mock",
+  });
+  if (!order) throw new ApiError(404, "Không tìm thấy giao dịch MoMo mô phỏng.");
+  if (order.expiresAt && order.expiresAt < new Date()) {
+    if (order.status !== ORDER_STATUS.PAID) {
+      order.status = ORDER_STATUS.CANCELED;
+      await order.save();
+    }
+    throw new ApiError(410, "Giao dịch mô phỏng đã hết hạn.");
+  }
+  if (order.status === ORDER_STATUS.PAID && order.creditedAt) return order;
+  if (order.status !== ORDER_STATUS.PENDING) {
+    throw new ApiError(409, "Giao dịch mô phỏng không còn ở trạng thái chờ.");
+  }
+
+  const paidAt = new Date();
+  const claimedOrder = await PaymentOrder.findOneAndUpdate(
+    { _id: order._id, status: ORDER_STATUS.PENDING },
+    {
+      $set: {
+        status: ORDER_STATUS.PAID,
+        paidAt,
+        confirmedAt: paidAt,
+        providerTransactionId: `MOMO-MOCK-${order.orderCode}`,
+        rawWebhookPayload: { mock: true, resultCode: 0 },
+      },
+    },
+    { returnDocument: "after" },
+  );
+  if (!claimedOrder) {
+    const currentOrder = await PaymentOrder.findById(order._id);
+    if (currentOrder?.status === ORDER_STATUS.PAID && currentOrder.creditedAt) {
+      return currentOrder;
+    }
+    throw new ApiError(409, "Giao dịch mô phỏng đang được xử lý.");
+  }
+  return finalizePaidOrder(claimedOrder);
+}
+
+export async function handleMomoIpn(payload) {
+  if (!verifyMomoIpn(payload)) throw new ApiError(401, "Chữ ký IPN MoMo không hợp lệ.");
+  const order = await PaymentOrder.findOne({ orderCode: payload.orderId, provider: "momo" });
+  if (!order) throw new ApiError(404, "Không tìm thấy đơn thanh toán MoMo.");
+  if (String(payload.partnerCode) !== String(env.MOMO_PARTNER_CODE) || Number(payload.amount) !== Number(order.amount)) {
+    throw new ApiError(400, "Thông tin giao dịch MoMo không khớp với đơn hàng.");
+  }
+  await assertUniqueProviderTransaction(order, payload.transId);
+  order.providerTransactionId = payload.transId ? String(payload.transId) : order.providerTransactionId;
+  order.rawWebhookPayload = payload;
+  if (Number(payload.resultCode) !== 0) {
+    if (order.status !== ORDER_STATUS.PAID) order.status = ORDER_STATUS.FAILED;
+    await order.save();
+    return order;
+  }
+  if (order.status === ORDER_STATUS.PAID && order.creditedAt) return order;
+  order.status = ORDER_STATUS.PAID;
+  order.paidAt = order.paidAt ?? new Date();
+  order.confirmedAt = order.confirmedAt ?? order.paidAt;
+  await order.save();
+  return finalizePaidOrder(order);
 }
 
 export async function createTopupOrder(userId, payload) {

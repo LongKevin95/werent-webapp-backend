@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node src/server.js",
+    "lint": "eslint .",
     "seed:test-users": "node --env-file=.env src/scripts/seed-test-users.js",
     "seed:search-properties": "node --env-file=.env src/scripts/seed-search-properties.js",
     "seed:administrative-divisions": "node --env-file=.env src/scripts/seed-administrative-divisions.js",
@@ -19,6 +20,7 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.1",
+    "google-auth-library": "^11.0.2",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.8.1",

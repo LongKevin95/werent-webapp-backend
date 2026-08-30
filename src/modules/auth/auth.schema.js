@@ -11,7 +11,10 @@ export const loginSchema = z
     login: z.union([z.string(), z.number()]).optional(),
     email: z.string().trim().optional(),
     phone: z.union([z.string(), z.number()]).optional(),
-    password: z.string().min(1, "Mật khẩu là bắt buộc"),
+    password: z.preprocess(
+      (value) => value ?? "",
+      z.string().min(1, "Mật khẩu là bắt buộc"),
+    ),
   })
   .superRefine((data, context) => {
     const identifier =
@@ -72,3 +75,7 @@ export const registerSchema = z
       });
     }
   });
+
+export const googleAuthSchema = z.object({
+  credential: z.string().trim().min(1, "Google credential là bắt buộc."),
+});

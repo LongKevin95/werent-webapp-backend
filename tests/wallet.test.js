@@ -6,6 +6,7 @@ import { ORDER_STATUS } from "../src/common/constants.js";
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
+process.env.MOMO_MOCK_ENABLED = "true";
 
 const { default: app } = await import("../src/app.js");
 const { default: PaymentOrder } = await import(
@@ -126,5 +127,55 @@ describe("wallet top-up and spending", () => {
         }),
       ]),
     );
+  });
+
+  it("confirms a MoMo mock top-up exactly once", async () => {
+    const registerResponse = await registerUser();
+    const token = registerResponse.body.data.accessToken;
+
+    const capabilitiesResponse = await request(app).get("/api/payments/packages");
+    expect(capabilitiesResponse.body.data.capabilities.momo).toEqual({
+      enabled: true,
+      mode: "mock",
+    });
+
+    const checkoutResponse = await request(app)
+      .post("/api/payments/top-up/checkout")
+      .set("Authorization", `Bearer ${token}`)
+      .set("Origin", "http://localhost:5173")
+      .send({ amount: 100000, paymentMethod: "momo" });
+
+    expect(checkoutResponse.status).toBe(201);
+    expect(checkoutResponse.body.data.checkout).toMatchObject({
+      method: "MOMO_MOCK",
+    });
+    expect(checkoutResponse.body.data.checkout.redirectUrl).toContain(
+      "/wallet/top-up/momo-mock",
+    );
+
+    const orderCode = checkoutResponse.body.data.order.orderCode;
+    const confirm = () =>
+      request(app)
+        .post("/api/payments/top-up/momo-mock/confirm")
+        .set("Authorization", `Bearer ${token}`)
+        .send({ orderCode });
+
+    const firstConfirmation = await confirm();
+    const repeatedConfirmation = await confirm();
+    expect(firstConfirmation.status).toBe(200);
+    expect(repeatedConfirmation.status).toBe(200);
+
+    const walletResponse = await request(app)
+      .get("/api/payments/wallet")
+      .set("Authorization", `Bearer ${token}`);
+    expect(walletResponse.body.data.summary).toMatchObject({
+      availableBalance: 100000,
+      totalDeposited: 100000,
+    });
+
+    const order = await PaymentOrder.findOne({ orderCode });
+    expect(order.status).toBe(ORDER_STATUS.PAID);
+    expect(order.provider).toBe("momo_mock");
+    expect(order.creditedAt).toBeTruthy();
   });
 });

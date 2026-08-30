@@ -5,6 +5,7 @@ export function notFoundHandler(req, res, next) {
 }
 
 export default function errorHandler(error, req, res, next) {
+  void next;
   let normalizedError = error;
 
   if (error?.code === "LIMIT_FILE_SIZE") {

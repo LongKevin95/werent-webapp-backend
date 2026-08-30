@@ -23,14 +23,28 @@ const notificationMocks = vi.hoisted(() => ({
   sendAdminWalletAdjustmentNotification: vi.fn(),
 }));
 
+const googleAuthMocks = vi.hoisted(() => ({
+  verifyIdToken: vi.fn(),
+}));
+
 vi.mock("../src/services/cloudinary.service.js", () => cloudinaryMocks);
 vi.mock(
   "../src/modules/notifications/notification.service.js",
   () => notificationMocks,
 );
+vi.mock("google-auth-library", () => ({
+  OAuth2Client: vi.fn().mockImplementation(function OAuth2Client() {
+    return {
+    verifyIdToken: googleAuthMocks.verifyIdToken,
+    };
+  }),
+}));
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
+process.env.GOOGLE_CLIENT_ID = "test-google-client-id.apps.googleusercontent.com";
+process.env.GOOGLE_AUTH_ALLOWED_EMAILS =
+  "allowed@gmail.com,existing-google@gmail.com";
 
 const { default: app } = await import("../src/app.js");
 
@@ -46,6 +60,19 @@ async function registerUser(overrides = {}) {
   };
 
   return request(app).post("/api/auth/register").send(payload);
+}
+
+function mockGooglePayload(overrides = {}) {
+  googleAuthMocks.verifyIdToken.mockResolvedValueOnce({
+    getPayload: () => ({
+      sub: "google-sub-123",
+      email: "allowed@gmail.com",
+      email_verified: true,
+      name: "Allowed Google User",
+      picture: "https://example.com/google-avatar.png",
+      ...overrides,
+    }),
+  });
 }
 
 describe("authentication and profile backlog", () => {
@@ -70,6 +97,7 @@ describe("authentication and profile backlog", () => {
     notificationMocks.sendWelcomeNotification
       .mockReset()
       .mockResolvedValue(null);
+    googleAuthMocks.verifyIdToken.mockReset();
   });
 
   afterAll(async () => {
@@ -95,6 +123,16 @@ describe("authentication and profile backlog", () => {
 
     expect(loginResponse.status).toBe(200);
     expect(loginResponse.body.data.user.phone).toBe("0901234567");
+  });
+
+  it("returns Vietnamese required-field messages for an empty login", async () => {
+    const response = await request(app).post("/api/auth/login").send({});
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe("Mật khẩu là bắt buộc");
+    expect(response.body.errors.fieldErrors.password).toContain(
+      "Mật khẩu là bắt buộc",
+    );
   });
 
   it("triggers a welcome notification after successful registration", async () => {
@@ -124,6 +162,72 @@ describe("authentication and profile backlog", () => {
     expect(registerResponse.status).toBe(201);
     expect(registerResponse.body.data.user.email).toBe("fallback@example.com");
     expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
+  });
+
+  it("creates an account from a whitelisted Google email", async () => {
+    mockGooglePayload();
+
+    const response = await request(app).post("/api/auth/google").send({
+      credential: "valid-google-id-token",
+    });
+
+    expect(response.status).toBe(200);
+    expect(googleAuthMocks.verifyIdToken).toHaveBeenCalledWith({
+      idToken: "valid-google-id-token",
+      audience: "test-google-client-id.apps.googleusercontent.com",
+    });
+    expect(response.body.data.accessToken).toEqual(expect.any(String));
+    expect(response.body.data.user).toMatchObject({
+      fullName: "Allowed Google User",
+      email: "allowed@gmail.com",
+      phone: null,
+      avatarUrl: "https://example.com/google-avatar.png",
+      roles: ["user"],
+    });
+    expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
+
+    const passwordLoginResponse = await request(app).post("/api/auth/login").send({
+      identifier: "allowed@gmail.com",
+      password: "Password123!",
+    });
+    expect(passwordLoginResponse.status).toBe(401);
+  });
+
+  it("links Google login to an existing whitelisted email account", async () => {
+    const registerResponse = await registerUser({
+      email: "existing-google@gmail.com",
+      phone: "0901111222",
+    });
+    notificationMocks.sendWelcomeNotification.mockClear();
+    mockGooglePayload({
+      sub: "google-existing-sub",
+      email: "existing-google@gmail.com",
+      name: "Existing Google User",
+    });
+
+    const response = await request(app).post("/api/auth/google").send({
+      credential: "valid-google-id-token",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.user.id).toBe(registerResponse.body.data.user.id);
+    expect(response.body.data.user.email).toBe("existing-google@gmail.com");
+    expect(response.body.data.user.phone).toBe("0901111222");
+    expect(notificationMocks.sendWelcomeNotification).not.toHaveBeenCalled();
+  });
+
+  it("rejects Google login when the email is not whitelisted", async () => {
+    mockGooglePayload({
+      sub: "google-blocked-sub",
+      email: "blocked@gmail.com",
+    });
+
+    const response = await request(app).post("/api/auth/google").send({
+      credential: "valid-google-id-token",
+    });
+
+    expect(response.status).toBe(403);
+    expect(response.body.message).toContain("chưa nằm trong danh sách");
   });
 
   it("requires both email and phone during registration", async () => {

@@ -15,12 +15,41 @@ const SEPAY_SIGNED_CHECKOUT_FIELDS = [
   "cancel_url",
 ];
 
+const DEFAULT_SEPAY_API_BASE_URL = "https://userapi.sepay.vn/v2";
+
+function normalizeBaseUrl(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return "";
+  }
+
+  try {
+    return new URL(trimmedValue).toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+function getSepayApiBaseUrl() {
+  return normalizeBaseUrl(env.SEPAY_API_BASE_URL) || DEFAULT_SEPAY_API_BASE_URL;
+}
+
+async function readJson(response) {
+  return response.json().catch(() => null);
+}
+
 export function verifySepaySignature(payload, signature = "") {
   if (!env.SEPAY_WEBHOOK_SECRET) {
     return true;
   }
 
-  const rawPayload = typeof payload === "string" ? payload : JSON.stringify(payload ?? {});
+  const rawPayload =
+    typeof payload === "string" ? payload : JSON.stringify(payload ?? {});
   const digest = crypto
     .createHmac("sha256", env.SEPAY_WEBHOOK_SECRET)
     .update(rawPayload)
@@ -124,14 +153,58 @@ export function normalizeSepayTransaction(payload = {}) {
 
   return {
     orderCode:
-      payload.orderCode ?? payload.code ?? payload.reference ?? payload.content ?? null,
+      payload.orderCode ??
+      payload.code ??
+      payload.reference ??
+      payload.content ??
+      null,
     transactionId:
-      payload.transactionId ?? payload.gatewayTransactionId ?? payload.id ?? null,
-    amount: Number(payload.amount ?? payload.transferAmount ?? 0),
+      payload.transactionId ??
+      payload.gatewayTransactionId ??
+      payload.id ??
+      null,
+    amount: Number(
+      payload.amount ?? payload.transferAmount ?? payload.amount_in ?? 0,
+    ),
     status: String(payload.status ?? "paid").toLowerCase(),
-    content: payload.content ?? payload.description ?? "",
+    content:
+      payload.content ??
+      payload.description ??
+      payload.transaction_content ??
+      "",
     rawPayload: payload,
   };
+}
+
+export async function fetchSepayTransactions(query = {}) {
+  if (!env.SEPAY_API_TOKEN) {
+    return [];
+  }
+
+  const baseUrl = getSepayApiBaseUrl();
+  const url = new URL("transactions", `${baseUrl}/`);
+
+  Object.entries(query).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${env.SEPAY_API_TOKEN}`,
+      Accept: "application/json",
+    },
+  });
+  const payload = await readJson(response);
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.message || `SePay API trả về mã ${response.status}.`,
+    );
+  }
+
+  return Array.isArray(payload?.data) ? payload.data : [];
 }
 
 export function buildSepayQrPayload(order) {

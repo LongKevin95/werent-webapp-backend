@@ -255,7 +255,8 @@ export async function createProperty(ownerId, payload, files = []) {
   const uploadedImages = await uploadFiles(files, {
     folder: "werent/properties",
   });
-  const { status: _status, ...propertyFields } = payload;
+  const propertyFields = { ...payload };
+  delete propertyFields.status;
 
   const propertyPayload = {
     ...propertyFields,
