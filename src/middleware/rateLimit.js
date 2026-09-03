@@ -1,6 +1,8 @@
 import rateLimit from "express-rate-limit";
 import env from "../config/env.js";
 
+const DEVELOPMENT_RATE_LIMIT_MAX = 1_000_000;
+
 function buildRateLimit(options) {
   return rateLimit({
     windowMs: options.windowMs,
@@ -16,13 +18,23 @@ function buildRateLimit(options) {
 
 export const apiRateLimit = buildRateLimit({
   windowMs: 15 * 60 * 1000,
-  max: env.NODE_ENV === "production" ? 1000 : 100,
+  max:
+    env.NODE_ENV === "development"
+      ? DEVELOPMENT_RATE_LIMIT_MAX
+      : env.NODE_ENV === "production"
+        ? 1000
+        : 100,
   message: "Bạn đã gửi quá nhiều yêu cầu. Vui lòng thử lại sau.",
 });
 
 export const authRateLimit = buildRateLimit({
   windowMs: 15 * 60 * 1000,
-  max: env.NODE_ENV === "production" ? 100 : 20,
+  max:
+    env.NODE_ENV === "development"
+      ? DEVELOPMENT_RATE_LIMIT_MAX
+      : env.NODE_ENV === "production"
+        ? 100
+        : 20,
   message: "Bạn đã thử đăng nhập quá nhiều lần. Vui lòng thử lại sau.",
 });
 
