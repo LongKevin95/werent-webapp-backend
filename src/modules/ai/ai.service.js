@@ -27,6 +27,7 @@ const PROPERTY_SEARCH_PRESET = Object.freeze({
 });
 const CHEAP_ROOM_MAX_PRICE = 2_000_000;
 const CHEAP_WHOLE_HOUSE_MAX_PRICE = 5_000_000;
+const CHEAP_TOWNHOUSE_MAX_PRICE = 10_000_000;
 const PROPERTY_SEARCH_PAGE_SIZE = 5;
 const geminiResponseCache = new Map();
 let geminiRateLimitedUntil = 0;
@@ -54,7 +55,7 @@ Chỉ trả về một JSON object hợp lệ, không markdown, không giải th
 
 Schema:
 {
-  "propertyTypes": ["Căn hộ chung cư" | "Phòng trọ" | "Nhà riêng" | "Nhà mặt phố" | "Biệt thự" | "Văn phòng" | "Mặt bằng" | "Đất nền"],
+  "propertyTypes": ["Căn hộ chung cư" | "Căn hộ dịch vụ" | "Phòng trọ" | "Nhà riêng" | "Nhà mặt phố" | "Biệt thự" | "Văn phòng" | "Mặt bằng" | "Đất nền"],
   "districts": ["Quận 7"],
   "city": "TP. Hồ Chí Minh",
   "minPrice": 0,
@@ -70,13 +71,26 @@ Schema:
 }
 
 Quy đổi mọi giá tiền sang VND/tháng. Ví dụ "15 triệu" là 15000000.
-Chỉ điền minPrice/maxPrice khi người dùng nêu con số cụ thể. Nếu người dùng chỉ nói "giá rẻ", "giá sinh viên", "tiết kiệm" mà không có con số thì để minPrice và maxPrice là null.
+Nếu người dùng nói "giá rẻ", "giá sinh viên" hoặc "tiết kiệm" mà không có con số, suy ra maxPrice theo loại: Phòng trọ/nhà trọ dưới 2000000, Nhà riêng/nhà nguyên căn dưới 5000000, Nhà mặt phố/nhà phố dưới 10000000. Nếu chưa rõ loại nhà thì để minPrice và maxPrice là null.
+Phân biệt rõ "căn hộ chung cư" và "căn hộ dịch vụ". Nếu người dùng nói "căn hộ dịch vụ", "chung cư mini", "căn hộ mini" hoặc "studio" thì chỉ trả propertyTypes ["Căn hộ dịch vụ"], không trả "Căn hộ chung cư".
+Nếu người dùng tìm "biệt thự" hoặc "villa", vẫn điền propertyTypes ["Biệt thự"] để hệ thống hiển thị thông báo chưa hỗ trợ.
 Chỉ đưa địa điểm vào nearbyPlaces khi câu có từ chỉ khoảng cách như "gần", "sát", "lân cận", "thuận tiện đến", "liền kề", "cạnh". Nếu người dùng nói "trong khu", "tại", "ở" một dự án/địa danh thì đưa vào keywords.
 Tiện ích trong requiredAmenities là các tiện ích người dùng nói bắt buộc/cần/có/phải có. Tiện ích trong amenities là ưu tiên mềm.
 Bỏ trống field bằng null hoặc [] nếu người dùng không nêu rõ.
 `.trim();
 
 const PROPERTY_TYPE_ALIASES = Object.freeze([
+  {
+    aliases: [
+      "can ho dich vu",
+      "chung cu mini",
+      "can ho mini",
+      "studio",
+      "serviced apartment",
+    ],
+    queryTerms: ["Căn hộ dịch vụ", "Chung cư mini", "Căn hộ mini", "Studio"],
+    value: "Căn hộ dịch vụ",
+  },
   {
     aliases: [
       "can ho",
@@ -86,24 +100,29 @@ const PROPERTY_TYPE_ALIASES = Object.freeze([
       "2pn",
       "3pn",
     ],
+    queryTerms: ["Căn hộ chung cư", "Chung cư", "Căn hộ", "Apartment"],
     value: "Căn hộ chung cư",
   },
   {
     aliases: ["phong tro", "nha tro", "phong cho thue", "tro"],
+    queryTerms: ["Phòng trọ", "Nhà trọ", "Phòng cho thuê", "Phòng thuê"],
     value: "Phòng trọ",
   },
   {
     aliases: ["nha rieng", "nha nguyen can", "nguyen can"],
+    queryTerms: ["Nhà riêng", "Nhà nguyên căn"],
     value: "Nhà riêng",
   },
   {
     aliases: [
+      "nha pho",
       "nha mat pho",
       "nha mat tien",
       "mat tien",
       "nha nguyen can",
       "nguyen can",
     ],
+    queryTerms: ["Nhà mặt phố", "Nhà phố", "Nhà mặt tiền"],
     value: "Nhà mặt phố",
   },
   {
@@ -112,10 +131,12 @@ const PROPERTY_TYPE_ALIASES = Object.freeze([
   },
   {
     aliases: ["van phong", "office"],
+    queryTerms: ["Văn phòng", "Office"],
     value: "Văn phòng",
   },
   {
     aliases: ["mat bang", "shop", "cua hang", "kinh doanh"],
+    queryTerms: ["Mặt bằng", "Mặt bằng kinh doanh", "Shop", "Cửa hàng"],
     value: "Mặt bằng",
   },
   {
@@ -123,6 +144,17 @@ const PROPERTY_TYPE_ALIASES = Object.freeze([
     value: "Đất nền",
   },
 ]);
+
+const SEARCHABLE_PROPERTY_TYPE_OPTIONS = Object.freeze([
+  "Phòng trọ",
+  "Căn hộ chung cư",
+  "Căn hộ dịch vụ",
+  "Nhà riêng",
+  "Nhà mặt phố",
+  "Mặt bằng",
+]);
+
+const UNSUPPORTED_PROPERTY_TYPES = Object.freeze(["Biệt thự"]);
 
 const DISTRICT_ALIASES = Object.freeze([
   { aliases: ["quan 1", "q1", "district 1"], value: "Quận 1" },
@@ -150,7 +182,14 @@ const DISTRICT_ALIASES = Object.freeze([
   { aliases: ["tan binh", "san bay"], value: "Quận Tân Bình" },
   { aliases: ["tan phu"], value: "Quận Tân Phú" },
   {
-    aliases: ["thu duc", "tp thu duc", "thanh pho thu duc"],
+    aliases: ["thu duc", "tp thu duc", "thanh pho thu duc", "quan thu duc"],
+    queryTerms: [
+      "TP. Thủ Đức",
+      "TP Thủ Đức",
+      "Thủ Đức",
+      "Thành phố Thủ Đức",
+      "Quận Thủ Đức",
+    ],
     value: "TP. Thủ Đức",
   },
   { aliases: ["nha be"], value: "Huyện Nhà Bè" },
@@ -933,25 +972,128 @@ function hasExplicitPriceCriteria(normalizedMessage) {
   return Boolean(criteria.minPrice || criteria.maxPrice);
 }
 
-function detectBudgetHint(message) {
-  const normalizedMessage = normalizeText(message);
-  const mentionsCheap = ["gia re", "gia sinh vien", "tiet kiem", "re"].some(
-    (term) => hasNormalizedTerm(normalizedMessage, term),
+function isUnsupportedPropertyType(propertyType) {
+  return UNSUPPORTED_PROPERTY_TYPES.some(
+    (unsupportedType) =>
+      normalizeText(propertyType) === normalizeText(unsupportedType),
   );
+}
+
+function normalizePropertyTypeMatches(propertyTypes = []) {
+  const supportedPropertyTypes = propertyTypes.filter(
+    (propertyType) => !isUnsupportedPropertyType(propertyType),
+  );
+
+  const normalizedPropertyTypes = supportedPropertyTypes.length
+    ? supportedPropertyTypes
+    : propertyTypes;
+
+  if (hasCriteriaValue(normalizedPropertyTypes, "Căn hộ dịch vụ")) {
+    return normalizedPropertyTypes.filter(
+      (propertyType) =>
+        normalizeText(propertyType) !== normalizeText("Căn hộ chung cư"),
+    );
+  }
+
+  return normalizedPropertyTypes;
+}
+
+const CHEAP_BUDGET_MAX_PRICES = Object.freeze({
+  "cheap-house": CHEAP_WHOLE_HOUSE_MAX_PRICE,
+  "cheap-room": CHEAP_ROOM_MAX_PRICE,
+  "cheap-townhouse": CHEAP_TOWNHOUSE_MAX_PRICE,
+});
+
+const CHEAP_BUDGET_TERMS = Object.freeze([
+  "gia re",
+  "gia sinh vien",
+  "tiet kiem",
+  "re",
+]);
+
+const CHEAP_ROOM_TERMS = Object.freeze([
+  "phong tro",
+  "nha tro",
+  "phong cho thue",
+  "tro",
+]);
+
+const CHEAP_WHOLE_HOUSE_TERMS = Object.freeze([
+  "nha nguyen can",
+  "nguyen can",
+  "nha rieng",
+]);
+
+const CHEAP_TOWNHOUSE_TERMS = Object.freeze([
+  "nha pho",
+  "nha mat pho",
+  "nha mat tien",
+  "mat tien",
+]);
+
+function detectCheapBudgetIntent(normalizedMessage) {
+  return CHEAP_BUDGET_TERMS.some((term) =>
+    hasNormalizedTerm(normalizedMessage, term),
+  );
+}
+
+function detectCheapBudgetHintFromPropertyTypes(propertyTypes = []) {
+  if (hasCriteriaValue(propertyTypes, "Nhà mặt phố")) {
+    return "cheap-townhouse";
+  }
+
+  if (hasCriteriaValue(propertyTypes, "Nhà riêng")) {
+    return "cheap-house";
+  }
+
+  if (hasCriteriaValue(propertyTypes, "Phòng trọ")) {
+    return "cheap-room";
+  }
+
+  return null;
+}
+
+function detectBudgetHint(message, criteria = {}) {
+  const normalizedMessage = normalizeText(message);
+  const mentionsCheap = detectCheapBudgetIntent(normalizedMessage);
 
   if (!mentionsCheap || hasExplicitPriceCriteria(normalizedMessage)) {
     return null;
   }
 
-  const mentionsWholeHouse = [
-    "nha nguyen can",
-    "nguyen can",
-    "nha rieng",
-    "nha mat pho",
-    "nha mat tien",
-  ].some((term) => hasNormalizedTerm(normalizedMessage, term));
+  const mentionsTownhouse = CHEAP_TOWNHOUSE_TERMS.some((term) =>
+    hasNormalizedTerm(normalizedMessage, term),
+  );
 
-  return mentionsWholeHouse ? "cheap-house" : "cheap-room";
+  if (mentionsTownhouse) {
+    return "cheap-townhouse";
+  }
+
+  const mentionsWholeHouse = CHEAP_WHOLE_HOUSE_TERMS.some((term) =>
+    hasNormalizedTerm(normalizedMessage, term),
+  );
+
+  if (mentionsWholeHouse) {
+    return "cheap-house";
+  }
+
+  const mentionsRoom =
+    CHEAP_ROOM_TERMS.some((term) =>
+      hasNormalizedTerm(normalizedMessage, term),
+    ) || hasNormalizedTerm(normalizedMessage, "sinh vien");
+
+  if (mentionsRoom) {
+    return "cheap-room";
+  }
+
+  return detectCheapBudgetHintFromPropertyTypes(criteria.propertyTypes);
+}
+
+function parseCheapBudgetCriteria(normalizedMessage, contextCriteria = {}) {
+  const budgetHint = detectBudgetHint(normalizedMessage, contextCriteria);
+  const maxPrice = CHEAP_BUDGET_MAX_PRICES[budgetHint];
+
+  return maxPrice ? { maxPrice } : {};
 }
 
 const NO_AMENITY_PREFERENCE_TERMS = Object.freeze([
@@ -1021,11 +1163,21 @@ function parseRoomCriteria(normalizedMessage) {
   return criteria;
 }
 
-function parseLocalPropertySearchCriteria(message) {
+function parseLocalPropertySearchCriteria(message, options = {}) {
   const normalizedMessage = normalizeText(message);
+  const propertyTypes = collectAliasMatches([], message, PROPERTY_TYPE_ALIASES);
+  const previousCriteria = normalizePreviousSearchCriteria(
+    options.previousCriteria,
+  );
+  const cheapBudgetContext = {
+    propertyTypes: propertyTypes.length
+      ? propertyTypes
+      : previousCriteria.propertyTypes,
+  };
 
   return normalizeSearchCriteria(
     {
+      ...parseCheapBudgetCriteria(normalizedMessage, cheapBudgetContext),
       ...parsePriceCriteria(normalizedMessage),
       ...parseAreaCriteria(normalizedMessage),
       ...parseRoomCriteria(normalizedMessage),
@@ -1040,7 +1192,7 @@ function parseLocalPropertySearchCriteria(message) {
         ...collectKnownLocationNearbyPlaceMatches(message),
       ],
       noAmenityPreference: hasNoAmenityPreference(message),
-      propertyTypes: collectAliasMatches([], message, PROPERTY_TYPE_ALIASES),
+      propertyTypes,
       requiredAmenities: collectRequiredAmenityMatches(message),
     },
     message,
@@ -1104,14 +1256,16 @@ function normalizeSearchCriteria(criteria = {}, rawText = "", options = {}) {
     ...collectAliasMatches(criteria.nearbyPlaces, "", NEARBY_PLACE_ALIASES),
     ...sanitizeFreeFormValues(criteria.nearbyPlaces, 8),
   ]).slice(0, 8);
-  const propertyTypes = uniqueValues([
-    ...collectAliasMatches(
-      criteria.propertyTypes,
-      rawText,
-      PROPERTY_TYPE_ALIASES,
-    ),
-    ...sanitizeFreeFormValues(criteria.propertyTypes, 3),
-  ]).slice(0, 3);
+  const propertyTypes = normalizePropertyTypeMatches(
+    uniqueValues([
+      ...collectAliasMatches(
+        criteria.propertyTypes,
+        rawText,
+        PROPERTY_TYPE_ALIASES,
+      ),
+      ...sanitizeFreeFormValues(criteria.propertyTypes, 3),
+    ]).slice(0, 3),
+  );
   const districts = uniqueValues([
     ...collectAliasMatches(criteria.districts, rawText, DISTRICT_ALIASES),
     ...sanitizeFreeFormValues(criteria.districts, 3),
@@ -1226,9 +1380,13 @@ function hasPreviousSearchCriteria(criteria = {}) {
 }
 
 async function parsePropertySearchCriteria(message, options = {}) {
-  const localCriteria = parseLocalPropertySearchCriteria(message);
+  const localCriteria = parseLocalPropertySearchCriteria(message, {
+    previousCriteria: options.previousCriteria,
+  });
 
   if (
+    getUnsupportedPropertyType(localCriteria) ||
+    hasCriteriaValue(localCriteria.propertyTypes, "Căn hộ dịch vụ") ||
     hasUsefulLocalPropertySearchCriteria(localCriteria) ||
     hasLocalSearchConstraint(localCriteria) ||
     (options.allowPartialLocalCriteria &&
@@ -1265,20 +1423,20 @@ async function parsePropertySearchCriteria(message, options = {}) {
       };
     }
 
-    const hasBudgetHintOnly = Boolean(detectBudgetHint(message));
+    const budgetHint = detectBudgetHint(message, localCriteria);
     const criteria = normalizeSearchCriteria(
       {
         ...parsedJson,
         maxArea: localCriteria.maxArea ?? parsedJson.maxArea,
-        maxPrice: hasBudgetHintOnly
-          ? undefined
-          : (localCriteria.maxPrice ?? parsedJson.maxPrice),
+        maxPrice:
+          localCriteria.maxPrice ??
+          (budgetHint ? undefined : parsedJson.maxPrice),
         minArea: localCriteria.minArea ?? parsedJson.minArea,
         minBathrooms: localCriteria.minBathrooms ?? parsedJson.minBathrooms,
         minBedrooms: localCriteria.minBedrooms ?? parsedJson.minBedrooms,
-        minPrice: hasBudgetHintOnly
-          ? undefined
-          : (localCriteria.minPrice ?? parsedJson.minPrice),
+        minPrice:
+          localCriteria.minPrice ??
+          (budgetHint ? undefined : parsedJson.minPrice),
         noAmenityPreference: localCriteria.noAmenityPreference,
         amenities: [
           ...toArray(parsedJson.amenities),
@@ -1328,6 +1486,44 @@ function createRegexConditions(fields, values) {
   });
 }
 
+function createExactRegexConditions(field, values, definitions = []) {
+  return values.flatMap((value) => {
+    const terms = definitions.length
+      ? getDefinitionTerms(value, definitions)
+      : [value];
+
+    return terms.map((term) => ({
+      [field]: {
+        $options: "i",
+        $regex: `^\\s*${escapeRegExp(term).replace(/\s+/g, "\\s+")}\\s*$`,
+      },
+    }));
+  });
+}
+
+function createDelimitedRegex(value) {
+  const pattern = escapeRegExp(value).replace(/\s+/g, "\\s+");
+
+  return `(^|[\\s,;:./()\\-])${pattern}(?=$|[\\s,;:./()\\-])`;
+}
+
+function createDistrictConditions(values) {
+  return values.flatMap((value) => {
+    const terms = getDefinitionTerms(value, DISTRICT_ALIASES);
+
+    return terms.flatMap((term) => {
+      const exactPattern = `^\\s*${escapeRegExp(term).replace(/\s+/g, "\\s+")}\\s*$`;
+      const delimitedPattern = createDelimitedRegex(term);
+
+      return [
+        { district: { $options: "i", $regex: exactPattern } },
+        { address: { $options: "i", $regex: delimitedPattern } },
+        { formattedAddress: { $options: "i", $regex: delimitedPattern } },
+      ];
+    });
+  });
+}
+
 function buildPropertySearchFilter(criteria) {
   const filters = {
     status: PROPERTY_STATUS.ACTIVE,
@@ -1336,10 +1532,7 @@ function buildPropertySearchFilter(criteria) {
 
   if (criteria.districts.length) {
     andConditions.push({
-      $or: createRegexConditions(
-        ["district", "address", "formattedAddress"],
-        criteria.districts,
-      ),
+      $or: createDistrictConditions(criteria.districts),
     });
   }
 
@@ -1354,9 +1547,10 @@ function buildPropertySearchFilter(criteria) {
 
   if (criteria.propertyTypes.length) {
     andConditions.push({
-      $or: createRegexConditions(
-        ["propertyType", "title"],
+      $or: createExactRegexConditions(
+        "propertyType",
         criteria.propertyTypes,
+        PROPERTY_TYPE_ALIASES,
       ),
     });
   }
@@ -1450,20 +1644,22 @@ function buildPropertySearchFilter(criteria) {
 
 function getDefinitionTerms(value, definitions) {
   const normalizedValue = normalizeText(value);
-  const definition = definitions.find(
+  const matchedDefinitions = definitions.filter(
     (item) =>
       normalizeText(item.value) === normalizedValue ||
       item.aliases.some((alias) => normalizeText(alias) === normalizedValue),
   );
 
-  if (!definition) {
+  if (!matchedDefinitions.length) {
     return [value];
   }
 
   return uniqueValues([
-    definition.value,
-    ...(definition.queryTerms ?? []),
-    ...definition.aliases,
+    ...matchedDefinitions.flatMap((definition) => [
+      definition.value,
+      ...(definition.queryTerms ?? []),
+      ...definition.aliases,
+    ]),
   ]);
 }
 
@@ -1789,6 +1985,12 @@ const BUDGET_INTAKE_RANGES = Object.freeze({
     { label: "7 - 10 triệu", maxPrice: 10_000_000, minPrice: 7_000_000 },
     { label: "Trên 10 triệu", minPrice: 10_000_000 },
   ],
+  "cheap-townhouse": [
+    { label: "Dưới 10 triệu", maxPrice: CHEAP_TOWNHOUSE_MAX_PRICE },
+    { label: "10 - 15 triệu", maxPrice: 15_000_000, minPrice: 10_000_000 },
+    { label: "15 - 20 triệu", maxPrice: 20_000_000, minPrice: 15_000_000 },
+    { label: "Trên 20 triệu", minPrice: 20_000_000 },
+  ],
   "cheap-room": [
     { label: "Dưới 2 triệu", maxPrice: CHEAP_ROOM_MAX_PRICE },
     { label: "2 - 3 triệu", maxPrice: 3_000_000, minPrice: 2_000_000 },
@@ -1812,16 +2014,6 @@ const BUDGET_INTAKE_RANGES = Object.freeze({
     { label: "Trên 7 triệu", minPrice: 7_000_000 },
   ],
 });
-
-const AMENITY_INTAKE_OPTIONS = Object.freeze([
-  { label: "Máy lạnh", value: "máy lạnh" },
-  { label: "Wifi", value: "wifi" },
-  { label: "Chỗ để xe", value: "bãi xe" },
-  { label: "Full nội thất", value: "full nội thất" },
-  { label: "Bảo vệ / camera", value: "bảo vệ" },
-  { label: "Gác lửng", value: "gác lửng" },
-  { label: "Ban công", value: "ban công" },
-]);
 
 function getBaseMessage(message) {
   return message.trim().replace(/[.?!]+$/, "");
@@ -1882,28 +2074,6 @@ function buildTypeRefinementOptions(message, options) {
     label,
     message: `${baseMessage}, loại ${label.toLowerCase()}.`,
   }));
-}
-
-function buildAmenityIntakeOptions(message, criteria) {
-  const knownAmenities = [...criteria.amenities, ...criteria.requiredAmenities];
-  const options = AMENITY_INTAKE_OPTIONS.filter(
-    (option) => !hasCriteriaValue(knownAmenities, option.value),
-  ).map((option) => ({
-    criteriaPatch: { amenities: [option.value] },
-    label: option.label,
-    message: `${getBaseMessage(message)}, ưu tiên ${option.value}.`,
-    value: option.value,
-  }));
-
-  options.push({
-    criteriaPatch: { noAmenityPreference: true },
-    exclusive: true,
-    label: "Không yêu cầu thêm",
-    message: `${getBaseMessage(message)}, không yêu cầu tiện ích đặc biệt.`,
-    value: null,
-  });
-
-  return options;
 }
 
 function hasCriteriaValue(values = [], targetValue) {
@@ -2054,21 +2224,39 @@ function hasBudgetCriteria(criteria) {
   return Boolean(criteria.maxPrice || criteria.minPrice);
 }
 
-function hasAmenityCriteria(criteria) {
-  return Boolean(
-    criteria.noAmenityPreference ||
-    criteria.amenities.length ||
-    criteria.requiredAmenities.length,
+function getUnsupportedPropertyType(criteria) {
+  return criteria.propertyTypes.find((propertyType) =>
+    isUnsupportedPropertyType(propertyType),
   );
 }
 
+function buildUnsupportedPropertyTypeReply(propertyType) {
+  return `Loại bất động sản ${String(propertyType).toLowerCase()} hiện chưa được hỗ trợ. Bạn có thể thử tìm phòng trọ, căn hộ chung cư, nhà riêng, nhà mặt phố hoặc mặt bằng.`;
+}
+
+function buildUnsupportedPropertyTypePrompt(message) {
+  return {
+    blocksSearch: true,
+    kind: "unsupported-property-type",
+    options: buildTypeRefinementOptions(
+      message,
+      SEARCHABLE_PROPERTY_TYPE_OPTIONS,
+    ),
+    question:
+      "Loại bất động sản này hiện chưa được hỗ trợ. Bạn muốn thử loại nào khác?",
+    remainingQuestions: 1,
+  };
+}
+
 function buildIntakeSteps(criteria, message) {
-  const budgetHint = detectBudgetHint(message);
+  const budgetHint = detectBudgetHint(message, criteria);
   const budgetQuestion =
     budgetHint === "cheap-room"
       ? "Bạn nói muốn giá rẻ, vậy ngân sách mỗi tháng cụ thể khoảng bao nhiêu để mình lọc đúng tầm giá?"
       : budgetHint === "cheap-house"
         ? "Với nhà nguyên căn giá rẻ, bạn dự tính ngân sách mỗi tháng khoảng bao nhiêu?"
+        : budgetHint === "cheap-townhouse"
+          ? "Với nhà phố giá rẻ, bạn dự tính ngân sách mỗi tháng khoảng bao nhiêu?"
         : "Ngân sách thuê mỗi tháng của bạn khoảng bao nhiêu?";
 
   return [
@@ -2096,26 +2284,12 @@ function buildIntakeSteps(criteria, message) {
       isMissing: !criteria.propertyTypes.length,
       prompt: {
         kind: "missing-property-type",
-        options: buildTypeRefinementOptions(message, [
-          "Phòng trọ",
-          "Căn hộ chung cư",
-          "Nhà riêng",
-          "Mặt bằng",
-        ]),
+        options: buildTypeRefinementOptions(
+          message,
+          SEARCHABLE_PROPERTY_TYPE_OPTIONS,
+        ),
         question:
           "Bạn muốn ưu tiên loại chỗ ở nào: phòng trọ, căn hộ, nhà riêng hay loại khác?",
-      },
-    },
-    {
-      isMissing: !hasAmenityCriteria(criteria),
-      prompt: {
-        kind: "missing-amenities",
-        messagePrefix: `${getBaseMessage(message)}, ưu tiên `,
-        multiSelect: true,
-        options: buildAmenityIntakeOptions(message, criteria),
-        question:
-          'Bạn cần những tiện ích nào? Chọn một hoặc nhiều tiện ích rồi bấm Tìm, hoặc chọn "Không yêu cầu thêm".',
-        submitLabel: "Tìm với tiện ích đã chọn",
       },
     },
   ];
@@ -2310,6 +2484,21 @@ function paginateSearchCandidates(candidates, criteria, limit, offset) {
   };
 }
 
+function createEmptyPropertySearchResult(limit, offset) {
+  return {
+    items: [],
+    pagination: {
+      hasMore: false,
+      limit,
+      nextOffset: offset,
+      offset,
+      total: 0,
+    },
+    relaxation: null,
+    relaxed: false,
+  };
+}
+
 async function searchProperties(criteria, limit, offset) {
   const candidates = await findSearchCandidates(criteria);
   const result = paginateSearchCandidates(candidates, criteria, limit, offset);
@@ -2344,18 +2533,7 @@ async function searchProperties(criteria, limit, offset) {
     }
   }
 
-  return {
-    items: [],
-    pagination: {
-      hasMore: false,
-      limit,
-      nextOffset: offset,
-      offset,
-      total: 0,
-    },
-    relaxation: null,
-    relaxed: false,
-  };
+  return createEmptyPropertySearchResult(limit, offset);
 }
 
 export async function createSupportChatCompletion(payload) {
@@ -2403,6 +2581,7 @@ export async function createPropertySearchCompletion(payload) {
   const { criteria: rawParsedCriteria, parsedBy } =
     await parsePropertySearchCriteria(payload.message, {
       allowPartialLocalCriteria: hasPreviousCriteria,
+      previousCriteria: payload.previousCriteria,
     });
   const parsedCriteria = applyLocationAnswerFallback(
     rawParsedCriteria,
@@ -2412,26 +2591,42 @@ export async function createPropertySearchCompletion(payload) {
   const criteria = hasPreviousCriteria
     ? mergeSearchCriteria(payload.previousCriteria, parsedCriteria)
     : parsedCriteria;
+  const unsupportedPropertyType = getUnsupportedPropertyType(criteria);
+
+  if (unsupportedPropertyType) {
+    const refinementPrompt = buildUnsupportedPropertyTypePrompt(
+      payload.message,
+    );
+    const searchResult = createEmptyPropertySearchResult(limit, offset);
+
+    return {
+      criteria,
+      criteriaLabels: buildCriteriaLabels(criteria),
+      followUpPrompt: null,
+      listings: searchResult.items,
+      model: isGeminiConfigured() ? env.GEMINI_MODEL : null,
+      parsedBy,
+      provider: parsedBy === "gemini" ? "gemini" : "local",
+      recognizedCriteria: buildRecognizedCriteria(criteria),
+      pagination: searchResult.pagination,
+      refinementPrompt,
+      relaxation: searchResult.relaxation,
+      relaxed: searchResult.relaxed,
+      reply: buildUnsupportedPropertyTypeReply(unsupportedPropertyType),
+    };
+  }
+
   const refinementPrompt = buildSearchRefinementPrompt(
     criteria,
     payload.message,
   );
   const searchResult = refinementPrompt?.blocksSearch
-    ? {
-        items: [],
-        pagination: {
-          hasMore: false,
-          limit,
-          nextOffset: offset,
-          offset,
-          total: 0,
-        },
-        relaxation: null,
-        relaxed: false,
-      }
+    ? createEmptyPropertySearchResult(limit, offset)
     : await searchProperties(criteria, limit, offset);
+  const matchingListingCount =
+    searchResult.pagination?.total ?? searchResult.items.length;
   const followUpPrompt =
-    searchResult.items.length &&
+    matchingListingCount >= 3 &&
     !refinementPrompt?.blocksSearch &&
     !refinementPrompt
       ? buildSearchFollowUpPrompt(criteria, payload.message)
