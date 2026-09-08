@@ -7,6 +7,8 @@
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node src/server.js",
     "lint": "eslint .",
+    "render-env:audit": "node src/scripts/render-env-sync.js",
+    "render-env:sync": "node src/scripts/render-env-sync.js --apply",
     "seed:test-users": "node --env-file=.env src/scripts/seed-test-users.js",
     "seed:search-properties": "node --env-file=.env src/scripts/seed-search-properties.js",
     "seed:administrative-divisions": "node --env-file=.env src/scripts/seed-administrative-divisions.js",

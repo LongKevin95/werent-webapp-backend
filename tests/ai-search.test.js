@@ -1,7 +1,15 @@
 import mongoose from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
 import request from "supertest";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { PROPERTY_STATUS } from "../src/common/constants.js";
 
 process.env.NODE_ENV = "test";
@@ -224,7 +232,13 @@ async function seedSearchListings() {
     },
     {
       address: "Dãy trọ 12, Đường số 7, Phường Tân Tạo A, Quận Bình Tân",
-      amenities: ["wifi", "máy lạnh", "bảo vệ", "chỗ để xe máy", "điện nước giá tốt"],
+      amenities: [
+        "wifi",
+        "máy lạnh",
+        "bảo vệ",
+        "chỗ để xe máy",
+        "điện nước giá tốt",
+      ],
       area: 22,
       bathrooms: 1,
       bedrooms: 1,
@@ -248,7 +262,8 @@ async function seedSearchListings() {
       city: "TP. Hồ Chí Minh",
       district: "Quận Bình Tân",
       furnishing: "Nội thất cơ bản",
-      locationNote: "Phòng trọ gần KCN Tân Tạo và chợ khu vực, điện nước giá tốt",
+      locationNote:
+        "Phòng trọ gần KCN Tân Tạo và chợ khu vực, điện nước giá tốt",
       nearbyPlaces: ["KCN Tân Tạo", "Chợ Tân Tạo"],
       owner: owner._id,
       price: 3900000,
@@ -336,7 +351,8 @@ describe("AI natural language property search", () => {
     expect(response.body.data.criteriaLabels).toEqual(
       expect.arrayContaining(["Căn hộ chung cư", "Quận 7"]),
     );
-    expect(response.body.data.reply).toContain("database WeRent");
+    expect(response.body.data.reply).toContain("Mình tìm thấy 1 tin đang hoạt động");
+    expect(response.body.data.reply).not.toContain("database WeRent");
     expect(response.body.data.listings).toHaveLength(1);
     expect(response.body.data.listings[0]).toMatchObject({
       bedrooms: 2,
@@ -344,8 +360,12 @@ describe("AI natural language property search", () => {
       price: 13500000,
       title: "Căn hộ 2PN River Panorama Quận 7 full nội thất",
     });
-    expect(response.body.data.recognizedCriteria.required.length).toBeGreaterThan(0);
-    expect(response.body.data.listings[0].matchReasons.length).toBeGreaterThan(0);
+    expect(
+      response.body.data.recognizedCriteria.required.length,
+    ).toBeGreaterThan(0);
+    expect(response.body.data.listings[0].matchReasons.length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("uses Gemini parsing when local search criteria are not specific enough", async () => {
@@ -379,10 +399,17 @@ describe("AI natural language property search", () => {
       status: 200,
     });
 
-    const firstResponse = await request(app).post("/api/ai/search").send({
-      limit: 5,
-      message: "G\u1ee3i \u00fd c\u0103n h\u1ed9 ph\u00f9 h\u1ee3p",
-    });
+    const firstResponse = await request(app)
+      .post("/api/ai/search")
+      .send({
+        limit: 5,
+        message: "G\u1ee3i \u00fd c\u0103n h\u1ed9 ph\u00f9 h\u1ee3p",
+        previousCriteria: {
+          districts: ["Quận 7", "Quận Bình Thạnh", "Quận Tân Bình"],
+          maxPrice: 30000000,
+          noAmenityPreference: true,
+        },
+      });
 
     expect(firstResponse.status).toBe(200);
     expect(firstResponse.body.data.listings).toHaveLength(5);
@@ -431,7 +458,8 @@ describe("AI natural language property search", () => {
 
   it("keeps project or landmark search results constrained to that location", async () => {
     const response = await request(app).post("/api/ai/search").send({
-      message: "tôi muốn thuê căn hộ trong khu landmark 81",
+      message:
+        "tôi muốn thuê căn hộ trong khu landmark 81, ngân sách dưới 30 triệu, không yêu cầu tiện ích đặc biệt",
       limit: 4,
     });
 
@@ -472,7 +500,8 @@ describe("AI natural language property search", () => {
 
   it("uses nearbyPlaces only when the user asks for proximity", async () => {
     const response = await request(app).post("/api/ai/search").send({
-      message: "tôi muốn thuê căn hộ gần landmark 81",
+      message:
+        "tôi muốn thuê căn hộ gần landmark 81, ngân sách dưới 30 triệu, không yêu cầu tiện ích đặc biệt",
       limit: 4,
     });
 
@@ -510,7 +539,9 @@ describe("AI natural language property search", () => {
   });
 
   it("falls back to local parsing when Gemini cannot parse search intent", async () => {
-    global.fetch = vi.fn().mockRejectedValue(new Error("Gemini is unavailable"));
+    global.fetch = vi
+      .fn()
+      .mockRejectedValue(new Error("Gemini is unavailable"));
 
     const response = await request(app).post("/api/ai/search").send({
       message: "Tìm căn hộ 2PN Quận 7 dưới 15 triệu full nội thất",
@@ -580,7 +611,9 @@ describe("AI natural language property search", () => {
       kind: "next-search-refinement",
     });
     expect(response.body.data.followUpPrompt.options.length).toBeGreaterThan(0);
-    expect(response.body.data.listings[0].matchReasons.length).toBeGreaterThan(0);
+    expect(response.body.data.listings[0].matchReasons.length).toBeGreaterThan(
+      0,
+    );
   });
 
   it("does not include listings above the explicit maximum budget", async () => {
@@ -599,7 +632,8 @@ describe("AI natural language property search", () => {
     });
 
     const response = await request(app).post("/api/ai/search").send({
-      message: "Nhà riêng tại tân bình giá rẻ, ngân sách từ 5 đến 10 triệu.",
+      message:
+        "Nhà riêng tại tân bình giá rẻ, ngân sách từ 5 đến 10 triệu, không yêu cầu tiện ích đặc biệt.",
     });
 
     expect(response.status).toBe(200);
@@ -630,35 +664,73 @@ describe("AI natural language property search", () => {
     );
   });
 
-  it("treats cheap whole-house intent as under five million when no explicit price is given", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: vi.fn().mockResolvedValue({
-        model: "gemini-3.8-flash",
-        output_text: JSON.stringify({
-          districts: ["Quận Tân Bình"],
-          maxPrice: 10000000,
-          propertyTypes: ["Nhà riêng"],
-        }),
-      }),
-      ok: true,
-      status: 200,
-    });
-
-    const response = await request(app).post("/api/ai/search").send({
+  it("asks for a concrete budget with cheap whole-house ranges before searching", async () => {
+    const firstResponse = await request(app).post("/api/ai/search").send({
       message: "Nhà nguyên căn giá rẻ tại Tân Bình",
     });
 
-    expect(response.status).toBe(200);
-    expect(response.body.data.criteria).toMatchObject({
+    expect(firstResponse.status).toBe(200);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(firstResponse.body.data.criteria).toMatchObject({
+      districts: ["Quận Tân Bình"],
+    });
+    expect(firstResponse.body.data.criteria.maxPrice).toBeUndefined();
+    expect(firstResponse.body.data.criteria.propertyTypes).toEqual(
+      expect.arrayContaining(["Nhà riêng", "Nhà mặt phố"]),
+    );
+    expect(firstResponse.body.data.listings).toHaveLength(0);
+    expect(firstResponse.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-budget",
+      remainingQuestions: 2,
+    });
+    expect(firstResponse.body.data.refinementPrompt.options[0]).toMatchObject({
+      criteriaPatch: { maxPrice: 5000000 },
+      label: "Dưới 5 triệu",
+    });
+
+    const budgetOption = firstResponse.body.data.refinementPrompt.options[0];
+    const secondResponse = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: budgetOption.message,
+        previousCriteria: {
+          ...firstResponse.body.data.criteria,
+          ...budgetOption.criteriaPatch,
+        },
+      });
+
+    expect(secondResponse.status).toBe(200);
+    expect(secondResponse.body.data.criteria).toMatchObject({
       districts: ["Quận Tân Bình"],
       maxPrice: 5000000,
     });
-    expect(response.body.data.criteria.propertyTypes).toEqual(
-      expect.arrayContaining(["Nhà riêng", "Nhà mặt phố"]),
+    expect(secondResponse.body.data.listings).toHaveLength(0);
+    expect(secondResponse.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-amenities",
+      multiSelect: true,
+    });
+
+    const skipOption = secondResponse.body.data.refinementPrompt.options.find(
+      (option) => option.exclusive,
     );
+    const response = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: skipOption.message,
+        previousCriteria: {
+          ...secondResponse.body.data.criteria,
+          ...skipOption.criteriaPatch,
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.refinementPrompt).toBeNull();
     expect(response.body.data.criteriaLabels).toEqual(
       expect.arrayContaining(["≤ 5 triệu/tháng"]),
     );
+    expect(response.body.data.listings.length).toBeGreaterThan(0);
     expect(
       response.body.data.listings.every((listing) => listing.price <= 5000000),
     ).toBe(true);
@@ -679,26 +751,53 @@ describe("AI natural language property search", () => {
     );
   });
 
-  it("asks a polite refinement question when soft preferences are missing", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: vi.fn().mockResolvedValue({
-        model: "gemini-3.8-flash",
-        output_text: JSON.stringify({
-          districts: ["TP. Thủ Đức"],
-          maxPrice: 5000000,
-          propertyTypes: ["Phòng trọ"],
-        }),
-      }),
-      ok: true,
-      status: 200,
-    });
-
+  it("asks for amenities (multi-select) before returning results when only preferences are missing", async () => {
     const response = await request(app).post("/api/ai/search").send({
-      message: "Tôi là sinh viên muốn tìm phòng trọ giá dưới 5tr/ tháng ở Thủ Đức",
+      message:
+        "Tôi là sinh viên muốn tìm phòng trọ giá dưới 5tr/ tháng ở Thủ Đức",
     });
 
     expect(response.status).toBe(200);
-    expect(response.body.data.listings).toEqual(
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(response.body.data.listings).toHaveLength(0);
+    expect(response.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-amenities",
+      multiSelect: true,
+      remainingQuestions: 1,
+    });
+    expect(response.body.data.refinementPrompt.question).toContain("tiện ích");
+    expect(response.body.data.refinementPrompt.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criteriaPatch: { amenities: ["máy lạnh"] },
+          label: "Máy lạnh",
+          value: "máy lạnh",
+        }),
+        expect.objectContaining({ label: "Full nội thất" }),
+        expect.objectContaining({
+          criteriaPatch: { noAmenityPreference: true },
+          exclusive: true,
+          label: "Không yêu cầu thêm",
+        }),
+      ]),
+    );
+
+    const followUp = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: `${response.body.data.refinementPrompt.messagePrefix}máy lạnh, wifi.`,
+        previousCriteria: {
+          ...response.body.data.criteria,
+          amenities: ["máy lạnh", "wifi"],
+        },
+      });
+
+    expect(followUp.status).toBe(200);
+    expect(followUp.body.data.criteria.amenities).toEqual(
+      expect.arrayContaining(["máy lạnh", "wifi"]),
+    );
+    expect(followUp.body.data.listings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           district: "TP. Thủ Đức",
@@ -707,41 +806,57 @@ describe("AI natural language property search", () => {
         }),
       ]),
     );
-    expect(response.body.data.refinementPrompt.question).toContain(
-      "Bạn có muốn ưu tiên nội thất",
-    );
-    expect(response.body.data.refinementPrompt.options).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ label: "Đầy đủ nội thất" }),
-        expect.objectContaining({ label: "Máy lạnh" }),
-      ]),
-    );
+    expect(followUp.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: false,
+      kind: "student-location-detail",
+    });
   });
 
-  it("treats cheap room intent as under two million when no explicit price is given", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: vi.fn().mockResolvedValue({
-        model: "gemini-3.8-flash",
-        output_text: JSON.stringify({
-          districts: ["TP. Thủ Đức"],
-          propertyTypes: ["Phòng trọ"],
-        }),
-      }),
-      ok: true,
-      status: 200,
-    });
-
+  it("asks for a concrete budget with cheap room ranges instead of assuming two million", async () => {
     const response = await request(app).post("/api/ai/search").send({
       message: "Tìm phòng trọ giá rẻ ở Thủ Đức",
     });
 
     expect(response.status).toBe(200);
-    expect(response.body.data.criteria).toMatchObject({
-      maxPrice: 2000000,
+    expect(response.body.data.criteria.maxPrice).toBeUndefined();
+    expect(response.body.data.listings).toHaveLength(0);
+    expect(response.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-budget",
     });
-    expect(response.body.data.criteriaLabels).toEqual(
-      expect.arrayContaining(["≤ 2 triệu/tháng"]),
-    );
+    expect(response.body.data.refinementPrompt.question).toContain("giá rẻ");
+    expect(response.body.data.refinementPrompt.options).toEqual([
+      expect.objectContaining({
+        criteriaPatch: { maxPrice: 2000000, minPrice: null },
+        label: "Dưới 2 triệu",
+        message: "Tìm phòng trọ giá rẻ ở Thủ Đức, ngân sách dưới 2 triệu.",
+      }),
+      expect.objectContaining({ label: "2 - 3 triệu" }),
+      expect.objectContaining({ label: "3 - 5 triệu" }),
+      expect.objectContaining({ label: "Trên 5 triệu" }),
+    ]);
+  });
+
+  it("accepts a bare budget answer typed by the user during the intake flow", async () => {
+    const response = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: "2 triệu",
+        previousCriteria: {
+          districts: ["TP. Thủ Đức"],
+          noAmenityPreference: true,
+          propertyTypes: ["Phòng trọ"],
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(response.body.data.criteria).toMatchObject({
+      districts: ["TP. Thủ Đức"],
+      maxPrice: 2000000,
+      noAmenityPreference: true,
+    });
+    expect(response.body.data.refinementPrompt).toBeNull();
     expect(response.body.data.listings[0]).toMatchObject({
       price: 1800000,
       title: "Phòng trọ giá rẻ Linh Trung Thủ Đức gần làng đại học",
@@ -749,24 +864,12 @@ describe("AI natural language property search", () => {
   });
 
   it("requires amenities when the user says the listing must have them", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      json: vi.fn().mockResolvedValue({
-        model: "gemini-3.8-flash",
-        output_text: JSON.stringify({
-          amenities: ["máy lạnh"],
-          districts: ["TP. Thủ Đức"],
-          propertyTypes: ["Phòng trọ"],
-        }),
-      }),
-      ok: true,
-      status: 200,
-    });
-
     const response = await request(app).post("/api/ai/search").send({
-      message: "Phòng trọ giá rẻ tại Thủ Đức có máy lạnh",
+      message: "Phòng trọ tại Thủ Đức dưới 2 triệu có máy lạnh",
     });
 
     expect(response.status).toBe(200);
+    expect(global.fetch).not.toHaveBeenCalled();
     expect(response.body.data.criteria).toMatchObject({
       maxPrice: 2000000,
       requiredAmenities: ["máy lạnh"],
@@ -792,11 +895,61 @@ describe("AI natural language property search", () => {
     );
   });
 
-  it("returns clickable refinement messages for broad cheap room searches", async () => {
+  it("always asks for location first before any other refinement question", async () => {
+    const response = await request(app).post("/api/ai/search").send({
+      message: "Tìm phòng trọ dưới 2 triệu có máy lạnh",
+    });
+
+    expect(response.status).toBe(200);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(response.body.data.listings).toHaveLength(0);
+    expect(response.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-location",
+    });
+    expect(response.body.data.refinementPrompt.question).toContain(
+      "quan trọng nhất",
+    );
+  });
+
+  it("accepts a free-form location answer while waiting for the location question", async () => {
+    global.fetch = vi
+      .fn()
+      .mockRejectedValue(new Error("Gemini is unavailable"));
+
+    const response = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: "Ở Linh Trung",
+        previousCriteria: {
+          maxPrice: 2000000,
+          noAmenityPreference: true,
+          propertyTypes: ["Phòng trọ"],
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.criteria).toMatchObject({
+      districts: ["Linh Trung"],
+      maxPrice: 2000000,
+      propertyTypes: ["Phòng trọ"],
+    });
+    expect(response.body.data.refinementPrompt).toBeNull();
+    expect(response.body.data.listings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          title: "Phòng trọ giá rẻ Linh Trung Thủ Đức gần làng đại học",
+        }),
+      ]),
+    );
+  });
+
+  it("walks a broad student request through location, budget and amenities before searching", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       json: vi.fn().mockResolvedValue({
         model: "gemini-3.8-flash",
         output_text: JSON.stringify({
+          maxPrice: 2000000,
           propertyTypes: ["Phòng trọ"],
         }),
       }),
@@ -804,23 +957,109 @@ describe("AI natural language property search", () => {
       status: 200,
     });
 
-    const response = await request(app).post("/api/ai/search").send({
-      message: "Phòng trọ giá rẻ",
+    const locationStep = await request(app).post("/api/ai/search").send({
+      message: "Tôi muốn tìm phòng trọ giá rẻ cho sinh viên",
     });
 
-    expect(response.status).toBe(200);
-    expect(response.body.data.criteria).toMatchObject({
-      maxPrice: 2000000,
+    expect(locationStep.status).toBe(200);
+    expect(locationStep.body.data.listings).toHaveLength(0);
+    expect(locationStep.body.data.criteria.maxPrice).toBeUndefined();
+    expect(locationStep.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-location",
+      remainingQuestions: 3,
     });
-    expect(response.body.data.refinementPrompt.question).toContain("khu vực");
-    expect(response.body.data.refinementPrompt.options).toEqual(
+    expect(locationStep.body.data.reply).toContain("3 thông tin");
+    expect(locationStep.body.data.refinementPrompt.question).toContain(
+      "khu vực",
+    );
+    expect(locationStep.body.data.refinementPrompt.options).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          criteriaPatch: { districts: ["TP. Thủ Đức"] },
           label: "TP. Thủ Đức",
-          message: "Phòng trọ giá rẻ ở TP. Thủ Đức.",
+          message: "Tôi muốn tìm phòng trọ giá rẻ cho sinh viên ở TP. Thủ Đức.",
         }),
       ]),
     );
+
+    const locationOption = locationStep.body.data.refinementPrompt.options.find(
+      (option) => option.label === "TP. Thủ Đức",
+    );
+    const budgetStep = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: locationOption.message,
+        previousCriteria: {
+          ...locationStep.body.data.criteria,
+          ...locationOption.criteriaPatch,
+        },
+      });
+
+    expect(budgetStep.status).toBe(200);
+    expect(budgetStep.body.data.listings).toHaveLength(0);
+    expect(budgetStep.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-budget",
+      remainingQuestions: 2,
+    });
+
+    const budgetOption = budgetStep.body.data.refinementPrompt.options[0];
+    const amenityStep = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: budgetOption.message,
+        previousCriteria: {
+          ...budgetStep.body.data.criteria,
+          ...budgetOption.criteriaPatch,
+        },
+      });
+
+    expect(amenityStep.status).toBe(200);
+    expect(amenityStep.body.data.listings).toHaveLength(0);
+    expect(amenityStep.body.data.criteria).toMatchObject({
+      districts: ["TP. Thủ Đức"],
+      maxPrice: 2000000,
+      propertyTypes: ["Phòng trọ"],
+    });
+    expect(amenityStep.body.data.refinementPrompt).toMatchObject({
+      blocksSearch: true,
+      kind: "missing-amenities",
+      multiSelect: true,
+      remainingQuestions: 1,
+    });
+
+    const amenityOption = amenityStep.body.data.refinementPrompt.options.find(
+      (option) => option.value === "máy lạnh",
+    );
+    const resultStep = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: amenityOption.message,
+        previousCriteria: {
+          ...amenityStep.body.data.criteria,
+          ...amenityOption.criteriaPatch,
+        },
+      });
+
+    expect(resultStep.status).toBe(200);
+    expect(resultStep.body.data.criteria).toMatchObject({
+      amenities: ["máy lạnh"],
+      districts: ["TP. Thủ Đức"],
+      maxPrice: 2000000,
+      propertyTypes: ["Phòng trọ"],
+    });
+    expect(resultStep.body.data.refinementPrompt?.blocksSearch).not.toBe(true);
+    expect(resultStep.body.data.listings.length).toBeGreaterThan(0);
+    expect(resultStep.body.data.listings[0]).toMatchObject({
+      district: "TP. Thủ Đức",
+      title: "Phòng trọ giá rẻ Linh Xuân Thủ Đức có máy lạnh",
+    });
+    expect(
+      resultStep.body.data.listings.every(
+        (listing) => listing.price <= 2000000,
+      ),
+    ).toBe(true);
   });
 
   it("asks for confirmation when a known place is missing its district", async () => {
@@ -862,17 +1101,19 @@ describe("AI natural language property search", () => {
   });
 
   it("keeps prior search context and suggests lower-priced listings when the requested range is empty", async () => {
-    const response = await request(app).post("/api/ai/search").send({
-      limit: 4,
-      message: "Tôi muốn kiếm phòng trọ",
-      previousCriteria: {
-        amenities: ["bảo vệ", "điện nước giá tốt"],
-        districts: ["Quận Bình Tân"],
-        maxPrice: 7000000,
-        minPrice: 5000000,
-        nearbyPlaces: ["KCN Tân Tạo", "Chợ"],
-      },
-    });
+    const response = await request(app)
+      .post("/api/ai/search")
+      .send({
+        limit: 4,
+        message: "Tôi muốn kiếm phòng trọ",
+        previousCriteria: {
+          amenities: ["bảo vệ", "điện nước giá tốt"],
+          districts: ["Quận Bình Tân"],
+          maxPrice: 7000000,
+          minPrice: 5000000,
+          nearbyPlaces: ["KCN Tân Tạo", "Chợ"],
+        },
+      });
 
     expect(response.status).toBe(200);
     expect(global.fetch).not.toHaveBeenCalled();
@@ -892,8 +1133,12 @@ describe("AI natural language property search", () => {
     });
     expect(response.body.data.reply).toContain("chưa thấy tin đúng khoảng");
     expect(response.body.data.listings.length).toBeGreaterThan(0);
-    expect(response.body.data.recognizedCriteria.required.length).toBeGreaterThan(0);
-    expect(response.body.data.listings[0].matchReasons.length).toBeGreaterThan(0);
+    expect(
+      response.body.data.recognizedCriteria.required.length,
+    ).toBeGreaterThan(0);
+    expect(response.body.data.listings[0].matchReasons.length).toBeGreaterThan(
+      0,
+    );
     expect(
       response.body.data.listings.every(
         (listing) =>

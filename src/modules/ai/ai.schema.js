@@ -5,21 +5,34 @@ const chatMessageSchema = z.object({
   content: z.string().trim().min(1).max(2000),
 });
 
+const optionalPositiveNumber = z.preprocess(
+  (value) => (value === null || value === "" ? undefined : value),
+  z.coerce.number().positive().optional(),
+);
+const optionalPositiveInteger = z.preprocess(
+  (value) => (value === null || value === "" ? undefined : value),
+  z.coerce.number().int().positive().optional(),
+);
+
 const searchCriteriaSchema = z
   .object({
     amenities: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
     city: z.string().trim().max(80).optional(),
     districts: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
     keywords: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
-    maxArea: z.coerce.number().positive().optional(),
-    maxPrice: z.coerce.number().positive().optional(),
-    minArea: z.coerce.number().positive().optional(),
-    minBathrooms: z.coerce.number().int().positive().optional(),
-    minBedrooms: z.coerce.number().int().positive().optional(),
-    minPrice: z.coerce.number().positive().optional(),
+    maxArea: optionalPositiveNumber,
+    maxPrice: optionalPositiveNumber,
+    minArea: optionalPositiveNumber,
+    minBathrooms: optionalPositiveInteger,
+    minBedrooms: optionalPositiveInteger,
+    minPrice: optionalPositiveNumber,
     nearbyPlaces: z.array(z.string().trim().min(1).max(80)).max(10).optional(),
+    noAmenityPreference: z.boolean().optional(),
     propertyTypes: z.array(z.string().trim().min(1).max(80)).max(6).optional(),
-    requiredAmenities: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+    requiredAmenities: z
+      .array(z.string().trim().min(1).max(80))
+      .max(12)
+      .optional(),
   })
   .partial();
 
@@ -47,7 +60,10 @@ export const propertySearchChatSchema = z.object({
     .string()
     .trim()
     .min(1, "Vui lòng nhập nhu cầu tìm nhà.")
-    .max(1200, "Nhu cầu tìm kiếm quá dài. Vui lòng rút gọn còn dưới 1200 ký tự."),
+    .max(
+      1200,
+      "Nhu cầu tìm kiếm quá dài. Vui lòng rút gọn còn dưới 1200 ký tự.",
+    ),
   offset: z.coerce.number().int().min(0).optional().default(0),
   previousCriteria: searchCriteriaSchema.optional().default({}),
 });
