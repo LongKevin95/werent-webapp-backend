@@ -2082,10 +2082,27 @@ function hasCriteriaValue(values = [], targetValue) {
   return values.some((value) => normalizeText(value) === normalizedTargetValue);
 }
 
-function buildSearchFollowUpPrompt(criteria, message) {
+function buildSearchFollowUpPrompt(criteria, message, matchingListingCount = 0) {
   const baseMessage = message.trim().replace(/[.?!]+$/, "");
   const options = [];
   const allAmenities = [...criteria.amenities, ...criteria.requiredAmenities];
+
+  if (!hasBudgetCriteria(criteria)) {
+    return {
+      blocksSearch: false,
+      kind: "budget-refinement",
+      options: buildBudgetRefinementOptions(
+        message,
+        criteria,
+        detectBudgetHint(message, criteria),
+      ).slice(0, 5),
+      question: "Bạn muốn lọc thêm theo khoảng giá nào?",
+    };
+  }
+
+  if (matchingListingCount < 3) {
+    return null;
+  }
 
   if (!hasCriteriaValue(criteria.requiredAmenities, "máy lạnh")) {
     options.push({
@@ -2249,16 +2266,6 @@ function buildUnsupportedPropertyTypePrompt(message) {
 }
 
 function buildIntakeSteps(criteria, message) {
-  const budgetHint = detectBudgetHint(message, criteria);
-  const budgetQuestion =
-    budgetHint === "cheap-room"
-      ? "Bạn nói muốn giá rẻ, vậy ngân sách mỗi tháng cụ thể khoảng bao nhiêu để mình lọc đúng tầm giá?"
-      : budgetHint === "cheap-house"
-        ? "Với nhà nguyên căn giá rẻ, bạn dự tính ngân sách mỗi tháng khoảng bao nhiêu?"
-        : budgetHint === "cheap-townhouse"
-          ? "Với nhà phố giá rẻ, bạn dự tính ngân sách mỗi tháng khoảng bao nhiêu?"
-        : "Ngân sách thuê mỗi tháng của bạn khoảng bao nhiêu?";
-
   return [
     {
       isMissing: !hasLocationCriteria(criteria),
@@ -2270,14 +2277,6 @@ function buildIntakeSteps(criteria, message) {
         ),
         question:
           "Trước tiên, bạn muốn tìm ở khu vực (quận/huyện) nào, hoặc gần trường/địa điểm nào? Đây là thông tin quan trọng nhất để mình gợi ý đúng, bạn có thể chọn nhanh bên dưới hoặc nhập tên khu vực.",
-      },
-    },
-    {
-      isMissing: !hasBudgetCriteria(criteria),
-      prompt: {
-        kind: "missing-budget",
-        options: buildBudgetRefinementOptions(message, criteria, budgetHint),
-        question: budgetQuestion,
       },
     },
     {
@@ -2626,10 +2625,14 @@ export async function createPropertySearchCompletion(payload) {
   const matchingListingCount =
     searchResult.pagination?.total ?? searchResult.items.length;
   const followUpPrompt =
-    matchingListingCount >= 3 &&
     !refinementPrompt?.blocksSearch &&
-    !refinementPrompt
-      ? buildSearchFollowUpPrompt(criteria, payload.message)
+    !refinementPrompt &&
+    matchingListingCount > 0
+      ? buildSearchFollowUpPrompt(
+          criteria,
+          payload.message,
+          matchingListingCount,
+        )
       : null;
 
   return {

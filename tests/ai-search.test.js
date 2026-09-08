@@ -463,8 +463,85 @@ describe("AI natural language property search", () => {
     expect(response.body.data.refinementPrompt).toMatchObject({
       blocksSearch: true,
       kind: "missing-location",
-      remainingQuestions: 2,
+      remainingQuestions: 1,
     });
+  });
+
+  it("returns results without requiring budget when location and type are present", async () => {
+    const response = await request(app).post("/api/ai/search").send({
+      message: "Tìm căn hộ chung cư ở Quận 7",
+    });
+
+    expect(response.status).toBe(200);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(response.body.data.criteria).toMatchObject({
+      districts: ["Quận 7"],
+      propertyTypes: ["Căn hộ chung cư"],
+    });
+    expect(response.body.data.criteria.maxPrice).toBeUndefined();
+    expect(response.body.data.criteria.minPrice).toBeUndefined();
+    expect(response.body.data.refinementPrompt).toBeNull();
+    expect(response.body.data.listings.length).toBeGreaterThan(0);
+    expect(
+      response.body.data.listings.every(
+        (listing) =>
+          listing.district === "Quận 7" &&
+          listing.propertyType === "Căn hộ chung cư",
+      ),
+    ).toBe(true);
+    expect(response.body.data.followUpPrompt).toMatchObject({
+      blocksSearch: false,
+      kind: "budget-refinement",
+      question: "Bạn muốn lọc thêm theo khoảng giá nào?",
+    });
+    expect(response.body.data.followUpPrompt.options).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criteriaPatch: { maxPrice: 5000000, minPrice: null },
+          label: "Dưới 5 triệu",
+        }),
+        expect.objectContaining({
+          criteriaPatch: { maxPrice: 15000000, minPrice: 10000000 },
+          label: "10 - 15 triệu",
+        }),
+      ]),
+    );
+  });
+
+  it("applies a selected budget range after returning broad search results", async () => {
+    const broadResponse = await request(app).post("/api/ai/search").send({
+      message: "Tìm căn hộ chung cư ở Quận 7",
+    });
+    const budgetOption = broadResponse.body.data.followUpPrompt.options.find(
+      (option) => option.label === "10 - 15 triệu",
+    );
+
+    const response = await request(app)
+      .post("/api/ai/search")
+      .send({
+        message: budgetOption.message,
+        previousCriteria: {
+          ...broadResponse.body.data.criteria,
+          ...budgetOption.criteriaPatch,
+        },
+      });
+
+    expect(response.status).toBe(200);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(response.body.data.criteria).toMatchObject({
+      districts: ["Quận 7"],
+      maxPrice: 15000000,
+      minPrice: 10000000,
+      propertyTypes: ["Căn hộ chung cư"],
+    });
+    expect(response.body.data.listings).toEqual([
+      expect.objectContaining({
+        district: "Quận 7",
+        price: 13500000,
+        propertyType: "Căn hộ chung cư",
+        title: "Căn hộ 2PN River Panorama Quận 7 full nội thất",
+      }),
+    ]);
   });
 
   it("returns only serviced apartments when the user asks for serviced apartments", async () => {
