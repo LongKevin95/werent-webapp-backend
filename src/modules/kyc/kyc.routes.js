@@ -1,5 +1,6 @@
 import { Router } from "express";
 import requireAuth from "../../middleware/auth.js";
+import requireRegularUser from "../../middleware/regularUser.js";
 import { verificationUpload } from "../../middleware/upload.js";
 import validate from "../../middleware/validate.js";
 import {
@@ -12,6 +13,7 @@ import { submitAccountKycSchema, submitListingVerificationSchema } from "./kyc.s
 
 const router = Router();
 router.use(requireAuth);
+router.use(requireRegularUser);
 router.get("/account", getMyAccountKyc);
 router.post(
   "/account",

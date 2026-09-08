@@ -2,12 +2,14 @@ import bcrypt from "bcryptjs";
 import { OAuth2Client } from "google-auth-library";
 import jwt from "jsonwebtoken";
 import ApiError from "../../common/ApiError.js";
-import { ROLES } from "../../common/constants.js";
+import { KYC_STATUS, ROLES } from "../../common/constants.js";
 import env from "../../config/env.js";
 import { sendWelcomeNotification } from "../notifications/notification.service.js";
 import User from "../users/user.model.js";
 
 const googleOAuthClient = new OAuth2Client();
+const GOOGLE_AUTH_CONFIG_HINT =
+  "Kiểm tra ngày giờ hệ thống, GOOGLE_CLIENT_ID backend trùng VITE_GOOGLE_CLIENT_ID frontend và origin frontend đã được thêm vào Authorized JavaScript origins của OAuth Web client.";
 
 function getAllowedGoogleEmails() {
   return new Set(
@@ -20,15 +22,35 @@ function getAllowedGoogleEmails() {
 
 function assertGoogleAuthConfigured() {
   if (!env.GOOGLE_CLIENT_ID) {
-    throw new ApiError(503, "Chưa cấu hình GOOGLE_CLIENT_ID cho đăng nhập Google.");
+    throw new ApiError(
+      503,
+      "Chưa cấu hình GOOGLE_CLIENT_ID cho đăng nhập Google.",
+      {
+        code: "GOOGLE_AUTH_NOT_CONFIGURED",
+      },
+    );
   }
 
   if (getAllowedGoogleEmails().size === 0) {
     throw new ApiError(
       503,
       "Chưa cấu hình GOOGLE_AUTH_ALLOWED_EMAILS cho đăng nhập Google.",
+      { code: "GOOGLE_AUTH_NOT_CONFIGURED" },
     );
   }
+}
+
+function createInvalidGoogleCredentialError(error) {
+  return new ApiError(401, "Google credential không hợp lệ.", {
+    code: "GOOGLE_CREDENTIAL_INVALID",
+    details:
+      env.NODE_ENV === "development"
+        ? {
+            hint: GOOGLE_AUTH_CONFIG_HINT,
+            reason: error?.message,
+          }
+        : null,
+  });
 }
 
 async function verifyGoogleCredential(credential) {
@@ -42,11 +64,13 @@ async function verifyGoogleCredential(credential) {
     const payload = ticket.getPayload();
 
     if (!payload?.sub || !payload.email) {
-      throw new ApiError(401, "Google credential không hợp lệ.");
+      throw createInvalidGoogleCredentialError();
     }
 
     if (payload.email_verified !== true) {
-      throw new ApiError(401, "Email Google chưa được xác minh.");
+      throw new ApiError(401, "Email Google chưa được xác minh.", {
+        code: "GOOGLE_EMAIL_NOT_VERIFIED",
+      });
     }
 
     return {
@@ -60,7 +84,7 @@ async function verifyGoogleCredential(credential) {
       throw error;
     }
 
-    throw new ApiError(401, "Google credential không hợp lệ.");
+    throw createInvalidGoogleCredentialError(error);
   }
 }
 
@@ -71,6 +95,7 @@ function assertGoogleEmailAllowed(email) {
     throw new ApiError(
       403,
       "Email Google này chưa nằm trong danh sách được phép đăng nhập.",
+      { code: "GOOGLE_EMAIL_NOT_ALLOWED" },
     );
   }
 }
@@ -83,13 +108,36 @@ function resolveGoogleDisplayName(profile) {
   return profile.email.split("@")[0];
 }
 
+function isGoogleHostedAvatar(avatarUrl) {
+  if (typeof avatarUrl !== "string" || !avatarUrl) {
+    return false;
+  }
+
+  try {
+    return /(^|\.)googleusercontent\.com$/i.test(new URL(avatarUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function shouldSyncGoogleAvatar(user, profile) {
+  return Boolean(
+    profile.avatarUrl &&
+    profile.avatarUrl !== user.avatarUrl &&
+    (!user.avatarUrl || isGoogleHostedAvatar(user.avatarUrl)),
+  );
+}
+
 export function serializeUser(user) {
+  const roles = Array.isArray(user.roles) ? user.roles : [];
+  const isAdmin = roles.includes(ROLES.ADMIN);
+
   return {
     id: user._id.toString(),
     fullName: user.fullName,
     email: user.email ?? null,
     phone: user.phone ?? null,
-    roles: user.roles,
+    roles,
     avatarUrl: user.avatarUrl ?? null,
     walletBalance: user.walletBalance ?? 0,
     walletPromotionBalance: user.walletPromotionBalance ?? 0,
@@ -100,8 +148,9 @@ export function serializeUser(user) {
     identityIssuedAt: user.identityIssuedAt ?? null,
     passportNumber: user.passportNumber ?? "",
     taxCode: user.taxCode ?? "",
-    kycStatus: user.kycStatus ?? "unverified",
-    canPostListing: user.canPostListing === true,
+    kycRequired: !isAdmin,
+    kycStatus: user.kycStatus ?? KYC_STATUS.UNVERIFIED,
+    canPostListing: !isAdmin && user.canPostListing === true,
     verifiedAt: user.verifiedAt ?? null,
     verifiedBy: user.verifiedBy ?? null,
     createdAt: user.createdAt,
@@ -243,7 +292,7 @@ export async function loginWithGoogle({ credential }) {
     }
 
     user.googleId = profile.googleId;
-    if (profile.avatarUrl && !user.avatarUrl) {
+    if (shouldSyncGoogleAvatar(user, profile)) {
       user.avatarUrl = profile.avatarUrl;
     }
     await user.save();

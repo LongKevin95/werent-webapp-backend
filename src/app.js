@@ -11,6 +11,7 @@ import { apiRateLimit } from "./middleware/rateLimit.js";
 import requireAuth from "./middleware/auth.js";
 import requireAdmin from "./middleware/admin.js";
 import administrativeDivisionRouter from "./modules/administrative-divisions/administrative-division.routes.js";
+import aiRouter from "./modules/ai/ai.routes.js";
 import adminRouter from "./modules/admin/admin.routes.js";
 import authRouter from "./modules/auth/auth.routes.js";
 import favoriteRouter from "./modules/favorites/favorite.routes.js";
@@ -126,7 +127,16 @@ function isAllowedCorsOrigin(origin) {
   });
 }
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginOpenerPolicy: {
+      policy: "same-origin-allow-popups",
+    },
+    referrerPolicy: {
+      policy: "no-referrer-when-downgrade",
+    },
+  }),
+);
 if (env.NODE_ENV !== "test") {
   app.use(
     pinoHttp({
@@ -158,13 +168,15 @@ app.use(
   }),
 );
 app.use(cookieParser());
-app.use(express.json({
-  verify(req, res, buffer) {
-    if (req.originalUrl?.startsWith("/api/payments/webhook/")) {
-      req.rawBody = buffer.toString("utf8");
-    }
-  },
-}));
+app.use(
+  express.json({
+    verify(req, res, buffer) {
+      if (req.originalUrl?.startsWith("/api/payments/webhook/")) {
+        req.rawBody = buffer.toString("utf8");
+      }
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(
   "/api/uploads/werent/kyc",
@@ -189,6 +201,7 @@ app.use(apiRateLimit);
 app.use("/api/auth", authRouter);
 app.use("/api/users", userRouter);
 app.use("/api/administrative-divisions", administrativeDivisionRouter);
+app.use("/api/ai", aiRouter);
 app.use("/api/properties", propertyRouter);
 app.use("/api/search", searchSuggestionRouter);
 app.use("/api/favorites", favoriteRouter);
@@ -198,7 +211,7 @@ app.use("/api/reports", reportRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/admin", adminRouter);
 
-app.get("/health", (req, res) => {
+app.get(["/health", "/api/health"], (req, res) => {
   res.status(200).json({
     success: true,
     message: "WeRent API is running",
