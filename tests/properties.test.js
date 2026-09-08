@@ -12,9 +12,8 @@ process.env.JWT_SECRET = "integration-test-secret";
 const { default: app } = await import("../src/app.js");
 const { default: Property } =
   await import("../src/modules/properties/property.model.js");
-const { default: WalletTransaction } = await import(
-  "../src/modules/payments/wallet-transaction.model.js"
-);
+const { default: WalletTransaction } =
+  await import("../src/modules/payments/wallet-transaction.model.js");
 const { default: User } = await import("../src/modules/users/user.model.js");
 
 let mongoServer;
@@ -30,12 +29,14 @@ async function registerUser(email = "owner@example.com") {
     .toString()
     .padStart(7, "0")
     .slice(-7);
-  const response = await request(app).post("/api/auth/register").send({
-    fullName: "Property Owner",
-    email,
-    phone: `090${phone}`,
-    password: "Password123!",
-  });
+  const response = await request(app)
+    .post("/api/auth/register")
+    .send({
+      fullName: "Property Owner",
+      email,
+      phone: `090${phone}`,
+      password: "Password123!",
+    });
   await User.findByIdAndUpdate(response.body.data.user.id, {
     kycStatus: "verified",
     canPostListing: true,
@@ -143,6 +144,213 @@ describe("property publishing workflow", () => {
 
     expect(searchResponse.status).toBe(200);
     expect(searchResponse.body.data.items).toHaveLength(0);
+  });
+
+  it("finds approved listings by exact title and type-location keyword", async () => {
+    const registerResponse = await registerUser("public-search@example.com");
+    const ownerId = registerResponse.body.data.user.id;
+    const targetTitle =
+      "Ph\u00f2ng tr\u1ecd an ninh g\u1ea7n KCN T\u00e2n T\u1ea1o B\u00ecnh T\u00e2n c\u00f3 m\u00e1y l\u1ea1nh";
+
+    await Property.create([
+      {
+        address:
+          "D\u00e3y tr\u1ecd 12, \u0110\u01b0\u1eddng s\u1ed1 7, Ph\u01b0\u1eddng T\u00e2n T\u1ea1o A, Qu\u1eadn B\u00ecnh T\u00e2n",
+        amenities: [
+          "wifi",
+          "m\u00e1y l\u1ea1nh",
+          "b\u1ea3o v\u1ec7",
+          "ch\u1ed7 \u0111\u1ec3 xe m\u00e1y",
+        ],
+        city: "TP. H\u1ed3 Ch\u00ed Minh",
+        district: "Qu\u1eadn B\u00ecnh T\u00e2n",
+        locationNote:
+          "G\u1ea7n KCN T\u00e2n T\u1ea1o, ch\u1ee3 T\u00e2n T\u1ea1o",
+        nearbyPlaces: ["KCN T\u00e2n T\u1ea1o"],
+        owner: ownerId,
+        price: 4800000,
+        propertyType: "Ph\u00f2ng tr\u1ecd",
+        status: PROPERTY_STATUS.ACTIVE,
+        title: targetTitle,
+      },
+      {
+        address:
+          "15 Nguy\u1ec5n C\u01a1 Th\u1ea1ch, TP. Th\u1ee7 \u0110\u1ee9c",
+        city: "TP. H\u1ed3 Ch\u00ed Minh",
+        district: "TP. Th\u1ee7 \u0110\u1ee9c",
+        owner: ownerId,
+        price: 7200000,
+        propertyType: "C\u0103n h\u1ed9 d\u1ecbch v\u1ee5",
+        status: PROPERTY_STATUS.ACTIVE,
+        title: "Studio kh\u00f4ng li\u00ean quan",
+      },
+    ]);
+
+    const titleResponse = await request(app)
+      .get("/api/properties")
+      .query({ keyword: targetTitle });
+
+    expect(titleResponse.status).toBe(200);
+    expect(titleResponse.body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district: "Qu\u1eadn B\u00ecnh T\u00e2n",
+          propertyType: "Ph\u00f2ng tr\u1ecd",
+          title: targetTitle,
+        }),
+      ]),
+    );
+
+    const typeLocationResponse = await request(app)
+      .get("/api/properties")
+      .query({
+        district: "binh tan",
+        keyword: "phong tro binh tan",
+        propertyType: "phong tro",
+      });
+
+    expect(typeLocationResponse.status).toBe(200);
+    expect(typeLocationResponse.body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district: "Qu\u1eadn B\u00ecnh T\u00e2n",
+          propertyType: "Ph\u00f2ng tr\u1ecd",
+          title: targetTitle,
+        }),
+      ]),
+    );
+
+    const districtOnlyTitle =
+      "Nh\u00e0 h\u1ebbm y\u00ean t\u0129nh g\u1ea7n trung t\u00e2m";
+
+    await Property.create({
+      address:
+        "12 L\u00ea Th\u00e1nh T\u00f4n, Ph\u01b0\u1eddng B\u1ebfn Ngh\u00e9, Qu\u1eadn 1",
+      city: "TP. H\u1ed3 Ch\u00ed Minh",
+      district: "Qu\u1eadn 1",
+      owner: ownerId,
+      price: 12000000,
+      propertyType: "Nh\u00e0 nguy\u00ean c\u0103n",
+      status: PROPERTY_STATUS.ACTIVE,
+      title: districtOnlyTitle,
+      ward: "Ph\u01b0\u1eddng B\u1ebfn Ngh\u00e9",
+    });
+
+    const districtTypeResponse = await request(app)
+      .get("/api/properties")
+      .query({
+        keyword: "qu\u1eadn 1",
+        propertyType: "Nh\u00e0 ri\u00eang",
+      });
+
+    expect(districtTypeResponse.status).toBe(200);
+    expect(districtTypeResponse.body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district: "Qu\u1eadn 1",
+          propertyType: "Nh\u00e0 nguy\u00ean c\u0103n",
+          title: districtOnlyTitle,
+        }),
+      ]),
+    );
+
+    const naturalKeywordResponse = await request(app)
+      .get("/api/properties")
+      .query({ keyword: "nh\u00e0 ri\u00eang qu\u1eadn 1" });
+
+    expect(naturalKeywordResponse.status).toBe(200);
+    expect(naturalKeywordResponse.body.data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          district: "Qu\u1eadn 1",
+          propertyType: "Nh\u00e0 nguy\u00ean c\u0103n",
+          title: districtOnlyTitle,
+        }),
+      ]),
+    );
+  });
+
+  it("matches location filters across city/district naming variants without substring collisions", async () => {
+    const registerResponse = await registerUser("location-search@example.com");
+    const ownerId = registerResponse.body.data.user.id;
+    const base = {
+      owner: ownerId,
+      price: 5000000,
+      propertyType: "Phòng trọ",
+      status: PROPERTY_STATUS.ACTIVE,
+    };
+
+    await Property.create([
+      {
+        ...base,
+        address: "12 Lê Thánh Tôn, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+        city: "TP. Hồ Chí Minh",
+        district: "Quận 1",
+        title: "Phòng trọ Quận 1",
+      },
+      {
+        ...base,
+        address: "5 Lạc Long Quân, Phường 5, Quận 11, Thành phố Hồ Chí Minh",
+        city: "Thành phố Hồ Chí Minh",
+        district: "Quận 11",
+        title: "Phòng trọ Quận 11",
+      },
+      {
+        ...base,
+        address:
+          "18/5 Đường số 17A, Phường Bình Trị Đông B, Quận Bình Tân, TP. Hồ Chí Minh",
+        city: "TP. Hồ Chí Minh",
+        district: "Quận Bình Tân",
+        title: "Phòng trọ Bình Tân 1",
+      },
+      {
+        ...base,
+        address:
+          "91 Tên Lửa, Phường An Lạc A, Quận Bình Tân, Thành phố Hồ Chí Minh",
+        city: "Thành phố Hồ Chí Minh",
+        district: "Quận Bình Tân",
+        title: "Phòng trọ Bình Tân 2",
+      },
+      {
+        ...base,
+        address: "1 Võ Văn Ngân, TP. Thủ Đức",
+        city: "TP. Hồ Chí Minh",
+        district: "TP. Thủ Đức",
+        title: "Phòng trọ Thủ Đức",
+      },
+    ]);
+
+    const titlesOf = (response) =>
+      response.body.data.items.map((item) => item.title).sort();
+
+    const district11Response = await request(app).get("/api/properties").query({
+      city: "Thành phố Hồ Chí Minh",
+      district: "Quận 11",
+      keyword: "quận 11",
+    });
+    expect(titlesOf(district11Response)).toEqual(["Phòng trọ Quận 11"]);
+
+    const district1Response = await request(app)
+      .get("/api/properties")
+      .query({ city: "Thành phố Hồ Chí Minh", district: "Quận 1" });
+    expect(titlesOf(district1Response)).toEqual(["Phòng trọ Quận 1"]);
+
+    const binhTanResponse = await request(app).get("/api/properties").query({
+      city: "Thành phố Hồ Chí Minh",
+      district: "Quận Bình Tân",
+      keyword: "Thuê BĐS tại Quận Bình Tân, Thành phố Hồ Chí Minh",
+    });
+    expect(titlesOf(binhTanResponse)).toEqual([
+      "Phòng trọ Bình Tân 1",
+      "Phòng trọ Bình Tân 2",
+    ]);
+
+    const thuDucResponse = await request(app).get("/api/properties").query({
+      city: "Thành phố Hồ Chí Minh",
+      district: "Thành phố Thủ Đức",
+      keyword: "Thuê phòng trọ tại Thành phố Thủ Đức, Thành phố Hồ Chí Minh",
+    });
+    expect(titlesOf(thuDucResponse)).toEqual(["Phòng trọ Thủ Đức"]);
   });
 
   it("accepts multipart payloads from the post listing wizard", async () => {

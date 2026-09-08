@@ -35,18 +35,30 @@ vi.mock(
 vi.mock("google-auth-library", () => ({
   OAuth2Client: vi.fn().mockImplementation(function OAuth2Client() {
     return {
-    verifyIdToken: googleAuthMocks.verifyIdToken,
+      verifyIdToken: googleAuthMocks.verifyIdToken,
     };
   }),
 }));
 
 process.env.NODE_ENV = "test";
 process.env.JWT_SECRET = "integration-test-secret";
-process.env.GOOGLE_CLIENT_ID = "test-google-client-id.apps.googleusercontent.com";
+process.env.GOOGLE_CLIENT_ID =
+  "test-google-client-id.apps.googleusercontent.com";
 process.env.GOOGLE_AUTH_ALLOWED_EMAILS =
   "allowed@gmail.com,existing-google@gmail.com";
 
 const { default: app } = await import("../src/app.js");
+const { loginWithGoogle } = await import("../src/modules/auth/auth.service.js");
+const { default: User } = await import("../src/modules/users/user.model.js");
+const { apiRateLimit, authRateLimit } =
+  await import("../src/middleware/rateLimit.js");
+
+async function resetRateLimits() {
+  for (const key of ["::ffff:127.0.0.1", "127.0.0.1", "::1"]) {
+    await apiRateLimit.resetKey(key);
+    await authRateLimit.resetKey(key);
+  }
+}
 
 let mongoServer;
 
@@ -83,6 +95,7 @@ describe("authentication and profile backlog", () => {
 
   beforeEach(async () => {
     await mongoose.connection.db.dropDatabase();
+    await resetRateLimits();
     cloudinaryMocks.deleteAsset.mockReset().mockResolvedValue({ result: "ok" });
     cloudinaryMocks.uploadFiles.mockReset().mockResolvedValue([
       {
@@ -186,11 +199,29 @@ describe("authentication and profile backlog", () => {
     });
     expect(notificationMocks.sendWelcomeNotification).toHaveBeenCalledOnce();
 
-    const passwordLoginResponse = await request(app).post("/api/auth/login").send({
-      identifier: "allowed@gmail.com",
-      password: "Password123!",
-    });
+    const passwordLoginResponse = await request(app)
+      .post("/api/auth/login")
+      .send({
+        identifier: "allowed@gmail.com",
+        password: "Password123!",
+      });
     expect(passwordLoginResponse.status).toBe(401);
+  });
+
+  it("returns a diagnostic code when Google credential verification fails", async () => {
+    googleAuthMocks.verifyIdToken.mockRejectedValueOnce(
+      new Error("Wrong recipient"),
+    );
+
+    await expect(
+      loginWithGoogle({
+        credential: "invalid-google-id-token",
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      message: "Google credential không hợp lệ.",
+      code: "GOOGLE_CREDENTIAL_INVALID",
+    });
   });
 
   it("links Google login to an existing whitelisted email account", async () => {
@@ -214,6 +245,45 @@ describe("authentication and profile backlog", () => {
     expect(response.body.data.user.email).toBe("existing-google@gmail.com");
     expect(response.body.data.user.phone).toBe("0901111222");
     expect(notificationMocks.sendWelcomeNotification).not.toHaveBeenCalled();
+  });
+
+  it("refreshes a stale Google-hosted avatar but keeps a custom avatar", async () => {
+    mockGooglePayload({
+      picture: "https://lh3.googleusercontent.com/a/old-avatar=s96-c",
+    });
+    const firstLogin = await request(app).post("/api/auth/google").send({
+      credential: "valid-google-id-token",
+    });
+    expect(firstLogin.status).toBe(200);
+    expect(firstLogin.body.data.user.avatarUrl).toBe(
+      "https://lh3.googleusercontent.com/a/old-avatar=s96-c",
+    );
+
+    mockGooglePayload({
+      picture: "https://lh3.googleusercontent.com/a/new-avatar=s96-c",
+    });
+    const secondLogin = await request(app).post("/api/auth/google").send({
+      credential: "valid-google-id-token",
+    });
+    expect(secondLogin.status).toBe(200);
+    expect(secondLogin.body.data.user.avatarUrl).toBe(
+      "https://lh3.googleusercontent.com/a/new-avatar=s96-c",
+    );
+
+    await User.updateOne(
+      { _id: secondLogin.body.data.user.id },
+      { avatarUrl: "/uploads/avatars/custom.png" },
+    );
+    mockGooglePayload({
+      picture: "https://lh3.googleusercontent.com/a/newer-avatar=s96-c",
+    });
+    const thirdLogin = await request(app).post("/api/auth/google").send({
+      credential: "valid-google-id-token",
+    });
+    expect(thirdLogin.status).toBe(200);
+    expect(thirdLogin.body.data.user.avatarUrl).toBe(
+      "/uploads/avatars/custom.png",
+    );
   });
 
   it("rejects Google login when the email is not whitelisted", async () => {

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import requireAdmin from "../../middleware/admin.js";
 import requireAuth from "../../middleware/auth.js";
+import requireRegularUser from "../../middleware/regularUser.js";
 import upload from "../../middleware/upload.js";
 import validate from "../../middleware/validate.js";
 import {
@@ -26,6 +27,7 @@ router.get("/", validate(propertyQuerySchema, "query"), getProperties);
 router.get(
   "/my-listings",
   requireAuth,
+  requireRegularUser,
   validate(myPropertyQuerySchema, "query"),
   getMyProperties,
 );
@@ -33,6 +35,7 @@ router.get("/:propertyId", getProperty);
 router.post(
   "/",
   requireAuth,
+  requireRegularUser,
   upload.array("images", 10),
   validate(createPropertySchema),
   createPropertyListing,
@@ -40,6 +43,7 @@ router.post(
 router.patch(
   "/:propertyId",
   requireAuth,
+  requireRegularUser,
   upload.array("images", 10),
   validate(updatePropertySchema),
   updatePropertyListing,
@@ -51,6 +55,6 @@ router.patch(
   validate(updatePropertyStatusSchema),
   reviewPropertyListing,
 );
-router.delete("/:propertyId", requireAuth, deletePropertyListing);
+router.delete("/:propertyId", requireAuth, requireRegularUser, deletePropertyListing);
 
 export default router;

@@ -69,6 +69,35 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: optionalString,
   CLOUDINARY_API_KEY: optionalString,
   CLOUDINARY_API_SECRET: optionalString,
+  GEMINI_API_KEY: optionalString,
+  GEMINI_MODEL: z.string().trim().min(1).default("gemini-flash-lite-latest"),
+  GEMINI_CHAT_MAX_OUTPUT_TOKENS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(4096)
+    .default(1024),
+  GEMINI_SEARCH_MAX_OUTPUT_TOKENS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(2048)
+    .default(768),
+  GEMINI_CHAT_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(120000)
+    .default(60000),
+  GEMINI_SEARCH_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(120000)
+    .default(30000),
+  GEMINI_THINKING_LEVEL: z
+    .enum(["low", "medium", "high"])
+    .default("low"),
   GEOAPIFY_API_KEY: optionalString,
   SEPAY_API_KEY: optionalString,
   SEPAY_MERCHANT_ID: optionalString,

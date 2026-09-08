@@ -3,6 +3,7 @@ import ApiError from "../../common/ApiError.js";
 import {
   KYC_STATUS,
   LISTING_VERIFICATION_STATUS,
+  ROLES,
 } from "../../common/constants.js";
 import { normalizeVietnamPhone } from "../../common/phone.js";
 import { deleteAsset, uploadFiles } from "../../services/cloudinary.service.js";
@@ -57,6 +58,12 @@ function pagination(query = {}) {
 export async function submitAccountKyc(userId, payload, files = {}) {
   const user = await User.findById(userId);
   if (!user) throw new ApiError(404, "Không tìm thấy người dùng.");
+  if (user.roles?.includes(ROLES.ADMIN)) {
+    throw new ApiError(
+      403,
+      "Tài khoản admin không cần và không được gửi KYC cá nhân.",
+    );
+  }
   if (user.kycStatus === KYC_STATUS.VERIFIED) {
     throw new ApiError(409, "Tài khoản đã được xác thực.");
   }
@@ -178,6 +185,12 @@ export async function submitListingVerification(
   files = [],
 ) {
   assertObjectId(propertyId, "Không tìm thấy tin đăng.");
+  if (user.roles?.includes(ROLES.ADMIN)) {
+    throw new ApiError(
+      403,
+      "Tài khoản admin không được gửi hồ sơ xác thực tin đăng.",
+    );
+  }
   if (user.kycStatus !== KYC_STATUS.VERIFIED || !user.canPostListing) {
     throw new ApiError(
       403,

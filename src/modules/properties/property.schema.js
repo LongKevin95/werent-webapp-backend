@@ -145,10 +145,20 @@ export const updatePropertySchema = createPropertySchema
   });
 
 export const propertyQuerySchema = z.object({
+  bathrooms: z.coerce.number().int().min(0).optional(),
+  bedrooms: z.coerce.number().int().min(0).optional(),
+  city: z.string().trim().optional(),
+  district: z.string().trim().optional(),
+  maxArea: z.coerce.number().min(0).optional(),
+  maxPrice: z.coerce.number().min(0).optional(),
+  minArea: z.coerce.number().min(0).optional(),
+  minPrice: z.coerce.number().min(0).optional(),
+  propertyType: z.string().trim().optional(),
   status: z.enum(PROPERTY_STATUS_LIST).optional(),
   owner: z.string().trim().optional(),
   keyword: z.string().trim().optional(),
-  limit: z.coerce.number().int().min(1).max(50).default(20),
+  ward: z.string().trim().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   page: z.coerce.number().int().min(1).default(1),
 });
 
