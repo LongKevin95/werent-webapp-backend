@@ -2082,10 +2082,31 @@ function hasCriteriaValue(values = [], targetValue) {
   return values.some((value) => normalizeText(value) === normalizedTargetValue);
 }
 
-function buildSearchFollowUpPrompt(criteria, message) {
+function buildSearchFollowUpPrompt(
+  criteria,
+  message,
+  matchingListingCount = 0,
+) {
   const baseMessage = message.trim().replace(/[.?!]+$/, "");
   const options = [];
   const allAmenities = [...criteria.amenities, ...criteria.requiredAmenities];
+
+  if (!hasBudgetCriteria(criteria)) {
+    return {
+      blocksSearch: false,
+      kind: "budget-refinement",
+      options: buildBudgetRefinementOptions(
+        message,
+        criteria,
+        detectBudgetHint(message, criteria),
+      ).slice(0, 5),
+      question: "Bạn muốn lọc thêm theo khoảng giá nào?",
+    };
+  }
+
+  if (matchingListingCount < 3) {
+    return null;
+  }
 
   if (!hasCriteriaValue(criteria.requiredAmenities, "máy lạnh")) {
     options.push({
@@ -2249,16 +2270,6 @@ function buildUnsupportedPropertyTypePrompt(message) {
 }
 
 function buildIntakeSteps(criteria, message) {
-  const budgetHint = detectBudgetHint(message, criteria);
-  const budgetQuestion =
-    budgetHint === "cheap-room"
-      ? "Bạn nói muốn giá rẻ, vậy ngân sách mỗi tháng cụ thể khoảng bao nhiêu để mình lọc đúng tầm giá?"
-      : budgetHint === "cheap-house"
-        ? "Với nhà nguyên căn giá rẻ, bạn dự tính ngân sách mỗi tháng khoảng bao nhiêu?"
-        : budgetHint === "cheap-townhouse"
-          ? "Với nhà phố giá rẻ, bạn dự tính ngân sách mỗi tháng khoảng bao nhiêu?"
-        : "Ngân sách thuê mỗi tháng của bạn khoảng bao nhiêu?";
-
   return [
     {
       isMissing: !hasLocationCriteria(criteria),
@@ -2270,14 +2281,6 @@ function buildIntakeSteps(criteria, message) {
         ),
         question:
           "Trước tiên, bạn muốn tìm ở khu vực (quận/huyện) nào, hoặc gần trường/địa điểm nào? Đây là thông tin quan trọng nhất để mình gợi ý đúng, bạn có thể chọn nhanh bên dưới hoặc nhập tên khu vực.",
-      },
-    },
-    {
-      isMissing: !hasBudgetCriteria(criteria),
-      prompt: {
-        kind: "missing-budget",
-        options: buildBudgetRefinementOptions(message, criteria, budgetHint),
-        question: budgetQuestion,
       },
     },
     {
@@ -2626,10 +2629,14 @@ export async function createPropertySearchCompletion(payload) {
   const matchingListingCount =
     searchResult.pagination?.total ?? searchResult.items.length;
   const followUpPrompt =
-    matchingListingCount >= 3 &&
     !refinementPrompt?.blocksSearch &&
-    !refinementPrompt
-      ? buildSearchFollowUpPrompt(criteria, payload.message)
+    !refinementPrompt &&
+    matchingListingCount > 0
+      ? buildSearchFollowUpPrompt(
+          criteria,
+          payload.message,
+          matchingListingCount,
+        )
       : null;
 
   return {
@@ -2654,4 +2661,234 @@ export async function createPropertySearchCompletion(payload) {
       refinementPrompt,
     }),
   };
+}
+
+const LISTING_TITLE_MAX_LENGTH = 100;
+const LISTING_DESCRIPTION_MAX_LENGTH = 2000;
+const LISTING_TITLE_SUGGESTION_COUNT = 5;
+
+const LISTING_TITLE_SYSTEM_INSTRUCTION = `
+Bạn là chuyên gia viết tin đăng bất động sản cho thuê trên nền tảng WeRent.
+Nhiệm vụ: tạo ${LISTING_TITLE_SUGGESTION_COUNT} tiêu đề tin đăng tiếng Việt hấp dẫn, trung thực, dựa đúng trên thông tin được cung cấp.
+
+Yêu cầu:
+- Mỗi tiêu đề tối đa ${LISTING_TITLE_MAX_LENGTH} ký tự, không dùng CHỮ IN HOA TOÀN BỘ, không emoji, không markdown.
+- Nêu bật loại bất động sản, vị trí, điểm mạnh (nội thất, diện tích, số phòng, tiện ích, giá) khi có dữ liệu.
+- Không bịa thông tin không được cung cấp (không tự thêm giá, tiện ích, khoảng cách).
+- ${LISTING_TITLE_SUGGESTION_COUNT} tiêu đề phải khác nhau về cách diễn đạt.
+
+Chỉ trả về một JSON object hợp lệ, không giải thích:
+{"titles": ["tiêu đề 1", "tiêu đề 2", "tiêu đề 3", "tiêu đề 4", "tiêu đề 5"]}
+`.trim();
+
+const LISTING_DESCRIPTION_SYSTEM_INSTRUCTION = `
+Bạn là chuyên gia viết tin đăng bất động sản cho thuê trên nền tảng WeRent.
+Nhiệm vụ: viết một mô tả tin đăng tiếng Việt chuyên nghiệp, trung thực, dựa đúng trên thông tin được cung cấp.
+
+Yêu cầu:
+- Độ dài 3-5 đoạn, tổng tối đa ${LISTING_DESCRIPTION_MAX_LENGTH} ký tự. Các đoạn cách nhau một dòng trống.
+- Cấu trúc gợi ý: mở đầu giới thiệu tổng quan; chi tiết diện tích/phòng/nội thất; tiện ích tòa nhà/khu vực và vị trí; kết bằng đối tượng phù hợp và lời mời liên hệ.
+- Không bịa thông tin không được cung cấp, không emoji, không markdown, không tiêu đề đề mục.
+- Viết đúng giọng điệu được yêu cầu.
+
+Chỉ trả về một JSON object hợp lệ, không giải thích:
+{"description": "nội dung mô tả"}
+`.trim();
+
+const LISTING_TONE_GUIDES = Object.freeze({
+  "Lịch sự":
+    "Giọng điệu lịch sự, chuyên nghiệp, chỉn chu, phù hợp mọi đối tượng.",
+  "Trẻ trung":
+    "Giọng điệu trẻ trung, gần gũi, năng động, hướng tới người thuê trẻ và sinh viên nhưng vẫn lịch sự.",
+  "Nhiệt tình":
+    "Giọng điệu nhiệt tình, hào hứng, nhấn mạnh lợi ích và kêu gọi liên hệ, nhưng không phóng đại sai sự thật.",
+});
+
+function formatListingRentPrice(rentPrice) {
+  const numericPrice = Number(String(rentPrice).replace(/[^\d]/g, ""));
+
+  if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+    return "";
+  }
+
+  return formatMonthlyPrice(numericPrice);
+}
+
+function buildListingAddressText(address = {}) {
+  const parts = [
+    address.addressLine,
+    address.street,
+    address.ward,
+    address.district,
+    address.city,
+  ]
+    .map((part) => String(part ?? "").trim())
+    .filter(Boolean);
+
+  return parts.join(", ");
+}
+
+function buildListingContentInput(payload) {
+  const { address = {}, amenities = [], property = {} } = payload;
+  const rentPriceLabel = formatListingRentPrice(property.rentPrice);
+  const lines = [
+    ["Loại bất động sản", property.propertyType],
+    ["Địa chỉ", buildListingAddressText(address)],
+    ["Tên tòa nhà / dự án", address.projectName],
+    ["Diện tích", property.area ? `${property.area} m²` : ""],
+    ["Số phòng ngủ", property.bedrooms],
+    ["Số phòng tắm", property.bathrooms],
+    ["Giá cho thuê", rentPriceLabel],
+    ["Tình trạng nội thất", property.furnishing],
+    ["Hướng nhà", property.orientation],
+    ["Tầng", property.floor],
+    ["Tổng số tầng", property.totalFloors],
+    [
+      "Thời gian vào ở dự kiến",
+      property.moveInDays ? `${property.moveInDays} ngày` : "",
+    ],
+    ["Tiện ích", amenities.join(", ")],
+    ["Ghi chú vị trí", payload.locationNote],
+  ]
+    .filter(([, value]) => String(value ?? "").trim())
+    .map(([label, value]) => `- ${label}: ${String(value).trim()}`);
+
+  return [
+    "Thông tin bất động sản cho thuê:",
+    ...lines,
+    "",
+    `Giọng điệu yêu cầu: ${payload.tone}. ${LISTING_TONE_GUIDES[payload.tone] ?? ""}`,
+    payload.variation
+      ? `Lần tạo thứ ${payload.variation + 1}: hãy viết khác các lần trước.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function sanitizeGeneratedTitles(titles) {
+  return uniqueValues(
+    toArray(titles).map((title) =>
+      String(title ?? "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, LISTING_TITLE_MAX_LENGTH),
+    ),
+  ).slice(0, LISTING_TITLE_SUGGESTION_COUNT);
+}
+
+function sanitizeGeneratedDescription(description) {
+  return String(description ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, LISTING_DESCRIPTION_MAX_LENGTH);
+}
+
+function buildLocalListingContentFallback(payload) {
+  const { address = {}, amenities = [], property = {} } = payload;
+  const addressText = buildListingAddressText(address);
+  const locationLabel = [address.projectName, addressText]
+    .filter(Boolean)
+    .join(", ");
+  const specParts = [
+    property.area ? `${property.area}m²` : "",
+    property.bedrooms ? `${property.bedrooms} phòng ngủ` : "",
+    property.bathrooms ? `${property.bathrooms} phòng tắm` : "",
+    property.furnishing || "",
+  ].filter(Boolean);
+  const rentPriceLabel = formatListingRentPrice(property.rentPrice);
+  const baseTitle = [
+    `Cho thuê ${property.propertyType.toLowerCase()}`,
+    specParts.slice(0, 2).join(" "),
+    locationLabel ? `tại ${locationLabel}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (payload.mode === "title") {
+    return {
+      titles: sanitizeGeneratedTitles([
+        baseTitle,
+        rentPriceLabel
+          ? `${baseTitle} - ${rentPriceLabel}`
+          : `${baseTitle} giá tốt`,
+        `${property.propertyType} ${specParts.join(", ")}${locationLabel ? ` - ${locationLabel}` : ""}`,
+        amenities.length
+          ? `${baseTitle}, ${amenities.slice(0, 2).join(", ").toLowerCase()}`
+          : `${baseTitle}, vào ở ngay`,
+        `Cho thuê nhanh ${property.propertyType.toLowerCase()}${locationLabel ? ` tại ${locationLabel}` : ""}`,
+      ]),
+    };
+  }
+
+  const paragraphs = [
+    `Cho thuê ${property.propertyType.toLowerCase()}${locationLabel ? ` tại ${locationLabel}` : ""}${rentPriceLabel ? `, giá ${rentPriceLabel}` : ""}.`,
+    specParts.length ? `Thông tin chính: ${specParts.join(", ")}.` : "",
+    amenities.length ? `Tiện ích nổi bật: ${amenities.join(", ")}.` : "",
+    payload.locationNote ? `Vị trí: ${payload.locationNote}.` : "",
+    "Liên hệ ngay để xem nhà và nhận tư vấn chi tiết.",
+  ].filter(Boolean);
+
+  return { description: sanitizeGeneratedDescription(paragraphs.join("\n\n")) };
+}
+
+export async function createListingContentCompletion(payload) {
+  const isTitleMode = payload.mode === "title";
+  const buildFallbackResult = (fallbackReason) => ({
+    ...buildLocalListingContentFallback(payload),
+    fallback: true,
+    fallbackReason,
+    mode: payload.mode,
+    model: null,
+    provider: "local",
+    tone: payload.tone,
+  });
+
+  if (!isGeminiConfigured()) {
+    return buildFallbackResult("gemini-not-configured");
+  }
+
+  try {
+    const result = await requestGeminiInteraction({
+      input: buildListingContentInput(payload),
+      maxOutputTokens: SUPPORT_CHAT_PRESET.maxOutputTokens,
+      systemInstruction: isTitleMode
+        ? LISTING_TITLE_SYSTEM_INSTRUCTION
+        : LISTING_DESCRIPTION_SYSTEM_INSTRUCTION,
+      temperature: 0.7,
+      thinkingLevel: SUPPORT_CHAT_PRESET.thinkingLevel,
+      timeoutMs: SUPPORT_CHAT_PRESET.timeoutMs,
+    });
+    const parsedJson = extractJsonObject(result.reply);
+    const titles = isTitleMode
+      ? sanitizeGeneratedTitles(parsedJson?.titles)
+      : [];
+    const description = isTitleMode
+      ? ""
+      : sanitizeGeneratedDescription(parsedJson?.description);
+
+    if ((isTitleMode && !titles.length) || (!isTitleMode && !description)) {
+      throw new ApiError(
+        502,
+        "Trợ lý AI chưa trả về nội dung phù hợp. Vui lòng thử lại.",
+      );
+    }
+
+    return {
+      cached: Boolean(result.cached),
+      description: isTitleMode ? undefined : description,
+      mode: payload.mode,
+      model: result.model,
+      provider: result.provider,
+      titles: isTitleMode ? titles : undefined,
+      tone: payload.tone,
+    };
+  } catch (error) {
+    if (isDevelopmentGeminiRateLimitError(error)) {
+      return buildFallbackResult("gemini-rate-limited");
+    }
+
+    throw error;
+  }
 }
